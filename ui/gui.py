@@ -293,21 +293,27 @@ class StatusBadge(ctk.CTkLabel):
 
 class Toast(ctk.CTkFrame):
     _COLORS = {"info": None, "success": "#00D48A", "error": "#FF4466"}
+    _W = 360
+    _H = 56
 
     def __init__(self, root: ctk.CTk, message: str, kind: str = "info", ms: int = 2800):
         color = self._COLORS.get(kind) or C["accent"]
+        # CustomTkinter ≥ 5.2 requires width/height on the constructor, not on .place().
         super().__init__(root, fg_color="#16162A", corner_radius=8,
-                         border_width=1, border_color=color)
+                         border_width=1, border_color=color,
+                         width=self._W, height=self._H)
+        self.pack_propagate(False)
+        self.grid_propagate(False)
+
         ctk.CTkLabel(self, text=message, text_color=C["text"], font=_font(12),
                      wraplength=320, justify="left").pack(padx=16, pady=10)
         ctk.CTkFrame(self, width=3, fg_color=color, corner_radius=0).place(x=0, y=0, relheight=1)
 
         root.update_idletasks()
         rw, rh = root.winfo_width(), root.winfo_height()
-        w, h   = 360, 56
-        x      = max(0, rw - w - 16)
-        y      = max(0, rh - h - 16)
-        self.place(x=x, y=y, width=w, height=h)
+        x = max(0, rw - self._W - 16)
+        y = max(0, rh - self._H - 16)
+        self.place(x=x, y=y)
         root.after(ms, self._safe_destroy)
 
     def _safe_destroy(self) -> None:

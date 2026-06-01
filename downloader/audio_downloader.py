@@ -267,8 +267,8 @@ class AudioDownloader:
 
         except Exception as exc:
             task.status    = DownloadStatus.ERROR
-            task.error_msg = str(exc)
-            self._notify(task, 0, f"Error: {exc}")
+            task.error_msg = self._humanise_error(str(exc))
+            self._notify(task, 0, f"Error: {task.error_msg}")
             log.error(f"[Downloader] Error: {exc}")
             return False
 
@@ -286,3 +286,40 @@ class AudioDownloader:
         """
         with self._flags_lock:
             self._cancel_flags[task_id] = True
+
+    # ── Error mapping ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _humanise_error(raw: str) -> str:
+        """
+        Map raw yt-dlp / ffmpeg errors to short, friendly Spanish messages.
+
+        Long tracebacks make the queue rows unreadable; a short tag plus the
+        last meaningful line keeps the row tidy while logs still capture the
+        full detail.
+        """
+        low = raw.lower()
+        if "403" in low or "forbidden" in low:
+            return "Acceso denegado (403) — vídeo restringido o yt-dlp desactualizado"
+        if "404" in low or "not found" in low:
+            return "No se encontró el contenido (404)"
+        if "429" in low or "too many requests" in low:
+            return "Rate limit alcanzado — espera unos minutos"
+        if "age-restricted" in low or "sign in to confirm" in low:
+            return "Vídeo con restricción de edad"
+        if "private video" in low:
+            return "Vídeo privado"
+        if "members-only" in low or "premium" in low:
+            return "Contenido sólo para miembros / premium"
+        if "geo" in low and ("restrict" in low or "block" in low):
+            return "Bloqueado en tu región"
+        if "ffmpeg" in low:
+            return "Error de conversión de audio (ffmpeg)"
+        if "no such file" in low or "permission denied" in low:
+            return "Error de escritura en disco — revisa la carpeta de destino"
+        if "network" in low or "timed out" in low or "connection" in low:
+            return "Error de red — verifica tu conexión"
+
+        # Fallback: keep only the last line so the row stays readable.
+        last = raw.strip().splitlines()[-1] if raw.strip() else "Error desconocido"
+        return last[:140]
