@@ -1,18 +1,54 @@
 @echo off
+setlocal
 cd /d "%~dp0"
+set "PYEXE=C:\Users\thiba\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+
 echo =============================================
-echo DIAGNOSTICO DJ TRACKS
+echo   DIAGNOSTICO DJ TRACKS
 echo =============================================
-echo Carpeta actual: %CD%
+echo Carpeta: %CD%
 echo.
-echo Primera linea de ui\gui.py:
-"C:\Users\thiba\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" -c "f=open('ui/gui.py',encoding='utf-8');print(f.readline().strip());f.close()"
+
+echo --- Python ---
+if exist "%PYEXE%" (
+    "%PYEXE%" -V
+) else (
+    echo Python del runtime no encontrado en: %PYEXE%
+)
 echo.
-echo Linea 5 de ui\gui.py (debe decir '4 temas visuales'):
-"C:\Users\thiba\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" -c "lines=open('ui/gui.py',encoding='utf-8').readlines();print(lines[4].strip())"
+
+echo --- Archivos clave ---
+for %%F in (main.py ui\gui.py core\controller.py core\search_manager.py ^
+            core\queue_persistence.py utils\history_manager.py ^
+            downloader\audio_downloader.py providers\__init__.py ^
+            __version__.py ffmpeg.exe) do (
+    if exist "%%F" (echo   [OK]   %%F) else (echo   [MISS] %%F)
+)
 echo.
-echo Existe history_manager.py:
-if exist "utils\history_manager.py" (echo SI) else (echo NO - FALTA ESTE ARCHIVO)
+
+echo --- Imports ---
+"%PYEXE%" -c "import sys; sys.path.insert(0,'.'); import core.controller, ui.gui, providers, downloader.audio_downloader, utils.history_manager, core.queue_persistence; print('  Todos los modulos importan correctamente')" 2>nul
+if errorlevel 1 echo   [FAIL] Errores en imports — ver logs\app.log
 echo.
+
+echo --- Dependencias ---
+"%PYEXE%" -c "import customtkinter,PIL,yt_dlp,spotipy,mutagen,requests,platformdirs; print('  customtkinter, PIL, yt_dlp, spotipy, mutagen, requests, platformdirs OK')" 2>nul
+if errorlevel 1 echo   [FAIL] Falta alguna dependencia — ejecutar: pip install -r requirements.txt
+echo.
+
+echo --- Tests (si pytest esta instalado) ---
+"%PYEXE%" -m pytest --collect-only -q tests 2>nul | findstr /R "test_"
+echo.
+
+echo --- Configuracion ---
+if exist "config\settings.json" (echo   [OK]   config\settings.json) else (echo   [MISS] config\settings.json — copia config\settings.example.json)
+if exist "config\history.json"  (echo   [OK]   config\history.json) else (echo   [INFO] config\history.json no existe aun ^(normal en primera ejecucion^))
+if exist "config\queue.json"    (echo   [INFO] config\queue.json con tareas pendientes) else (echo   [OK]   sin tareas pendientes persistidas)
+echo.
+
+echo --- Version ---
+"%PYEXE%" -c "import sys; sys.path.insert(0,'.'); from __version__ import __version__; print(f'  DJ Tracks v{__version__}')" 2>nul
+echo.
+
 echo =============================================
 pause

@@ -13,6 +13,7 @@ logs/
 # Local user configuration / credentials  ← NEVER commit these
 config/settings.json
 config/history.json
+config/queue.json
 
 # Large local binaries
 ffmpeg.exe

@@ -9,7 +9,11 @@ Python 3.10+  ·  CustomTkinter  ·  Pillow
 from __future__ import annotations
 
 import io
+import os
+import platform
+import subprocess
 import threading
+import webbrowser
 from collections import OrderedDict
 from pathlib import Path
 from tkinter import PhotoImage, filedialog
@@ -20,10 +24,53 @@ import customtkinter as ctk
 from PIL import Image
 import requests
 
+from __version__ import __app_name__, __app_subtitle__, __version__
 from core.controller import AppController
 from downloader.audio_downloader import DownloadStatus, DownloadTask
 from providers import TrackInfo
 from utils.history_manager import HistoryManager
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Platform-aware helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _open_in_file_manager(path: Path) -> None:
+    """Reveal *path* in the system file manager (Explorer / Finder / xdg-open)."""
+    try:
+        p = path if path.exists() else path.parent
+        if not p.exists():
+            return
+        system = platform.system()
+        if system == "Windows":
+            if p.is_dir():
+                os.startfile(str(p))                          # noqa: S606
+            else:
+                subprocess.Popen(["explorer", "/select,", str(p)])
+        elif system == "Darwin":
+            subprocess.Popen(["open", "-R", str(p)] if p.is_file() else ["open", str(p)])
+        else:
+            subprocess.Popen(["xdg-open", str(p if p.is_dir() else p.parent)])
+    except Exception:
+        pass
+
+
+def _open_url(url: str) -> None:
+    """Open *url* in the user's default browser."""
+    if url:
+        try:
+            webbrowser.open(url, new=2)
+        except Exception:
+            pass
+
+
+def _copy_to_clipboard(root: ctk.CTk, text: str) -> None:
+    """Copy *text* to the system clipboard."""
+    try:
+        root.clipboard_clear()
+        root.clipboard_append(text)
+    except Exception:
+        pass
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Theme system
@@ -318,7 +365,33 @@ class MiniWaveform(tk.Canvas):
 # Search result widgets
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TrackRow(ctk.CTkFrame):
+class _TrackContextMenuMixin:
+    """Adds a right-click context menu with platform-aware actions."""
+
+    def _show_track_menu(self, event, track: TrackInfo) -> None:
+        menu = tk.Menu(self, tearoff=0,
+                       bg=C["card"], fg=C["text"],
+                       activebackground=C["accent"], activeforeground="#000",
+                       borderwidth=0)
+        plat_label = PLATFORM_LABELS.get(track.platform, "plataforma").title()
+        menu.add_command(label=f"Abrir en {plat_label}",
+                         command=lambda: _open_url(track.source_url),
+                         state="normal" if track.source_url else "disabled")
+        menu.add_command(label="Copiar enlace",
+                         command=lambda: _copy_to_clipboard(self.winfo_toplevel(), track.source_url),
+                         state="normal" if track.source_url else "disabled")
+        menu.add_separator()
+        menu.add_command(label="Copiar título",
+                         command=lambda: _copy_to_clipboard(
+                             self.winfo_toplevel(),
+                             f"{track.artist_str} — {track.title}"))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+
+class TrackRow(ctk.CTkFrame, _TrackContextMenuMixin):
     """Horizontal list row for search results."""
 
     def __init__(self, parent, track: TrackInfo, on_add: Callable, **kw):
@@ -329,6 +402,7 @@ class TrackRow(ctk.CTkFrame):
         self._build()
         self.bind("<Enter>", lambda _: self.configure(fg_color=C["card_hover"]) if not self._added else None)
         self.bind("<Leave>", lambda _: self.configure(fg_color=C["card"])       if not self._added else None)
+        self.bind("<Button-3>", lambda e, t=track: self._show_track_menu(e, t))
 
     def _build(self) -> None:
         t  = self._track
@@ -386,7 +460,7 @@ class TrackRow(ctk.CTkFrame):
         self.after(200, lambda: self.configure(fg_color=C["card"]))
 
 
-class TrackCard(ctk.CTkFrame):
+class TrackCard(ctk.CTkFrame, _TrackContextMenuMixin):
     """Grid card for search results."""
 
     _CARD_W = 185
@@ -400,6 +474,7 @@ class TrackCard(ctk.CTkFrame):
         self._on_add = on_add
         self._added  = False
         self._build()
+        self.bind("<Button-3>", lambda e, t=track: self._show_track_menu(e, t))
 
     def _build(self) -> None:
         t  = self._track
@@ -503,6 +578,14 @@ class QueueRow(ctk.CTkFrame):
         self._err_lbl  = ctk.CTkLabel(body, text="", font=_font(9),
                                       text_color=C["error"], anchor="w", wraplength=420)
 
+        # Double-click anywhere on the row opens the file (when DONE).
+        self.bind("<Double-Button-1>", self._open_output)
+        body.bind("<Double-Button-1>", self._open_output)
+
+    def _open_output(self, _event=None) -> None:
+        if self._task.status == DownloadStatus.DONE and self._task.output_path:
+            _open_in_file_manager(self._task.output_path)
+
     def update_task(self, task: DownloadTask) -> None:
         self._task = task
         if self._pbar:
@@ -529,10 +612,12 @@ class QueueRow(ctk.CTkFrame):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class HistoryRow(ctk.CTkFrame):
-    """One row in the history panel table."""
+    """One row in the history panel table.  Double-click opens the file in
+    the system file manager; right-click shows a context menu."""
 
     def __init__(self, parent, record, **kw):
         super().__init__(parent, fg_color=C["card"], corner_radius=5, **kw)
+        self._record = record
         r  = record
         ok = r.status == "done"
         pc = PLATFORM_COLORS.get(r.platform, C["text_dim"])
@@ -560,6 +645,43 @@ class HistoryRow(ctk.CTkFrame):
                      font=_font(9), text_color=C["text_dim"], anchor="e").pack(anchor="e")
         ctk.CTkLabel(meta, text=r.date_str,
                      font=_font(8, mono=True), text_color=C["text_dim"], anchor="e").pack(anchor="e")
+
+        # Bind interactions on every child so clicks anywhere on the row work.
+        self._bind_recursive(self, "<Double-Button-1>", self._open_file)
+        self._bind_recursive(self, "<Button-3>",        self._show_menu)
+        self._bind_recursive(self, "<Enter>", lambda _: self.configure(fg_color=C["card_hover"]))
+        self._bind_recursive(self, "<Leave>", lambda _: self.configure(fg_color=C["card"]))
+
+    def _bind_recursive(self, widget, sequence: str, callback) -> None:
+        widget.bind(sequence, callback)
+        for child in widget.winfo_children():
+            self._bind_recursive(child, sequence, callback)
+
+    def _open_file(self, _event=None) -> None:
+        if self._record.path:
+            _open_in_file_manager(Path(self._record.path))
+
+    def _show_menu(self, event) -> None:
+        menu = tk.Menu(self, tearoff=0,
+                       bg=C["card"], fg=C["text"],
+                       activebackground=C["accent"], activeforeground="#000",
+                       borderwidth=0)
+        has_path = bool(self._record.path) and Path(self._record.path).exists()
+        menu.add_command(label="Abrir archivo",
+                         command=self._open_file,
+                         state="normal" if has_path else "disabled")
+        menu.add_command(label="Abrir carpeta",
+                         command=lambda: _open_in_file_manager(Path(self._record.path).parent)
+                         if self._record.path else None,
+                         state="normal" if has_path else "disabled")
+        menu.add_separator()
+        menu.add_command(label="Copiar ruta",
+                         command=lambda: _copy_to_clipboard(self.winfo_toplevel(), self._record.path),
+                         state="normal" if self._record.path else "disabled")
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1465,9 +1587,9 @@ class Sidebar(ctk.CTkFrame):
         brand = ctk.CTkFrame(self, fg_color="transparent", height=72)
         brand.pack(fill="x")
         brand.pack_propagate(False)
-        ctk.CTkLabel(brand, text="DJ TRACKS", font=_font(17, "bold"),
+        ctk.CTkLabel(brand, text=__app_name__.upper(), font=_font(17, "bold"),
                      text_color=C["accent"]).pack(anchor="w", padx=20, pady=(22, 0))
-        ctk.CTkLabel(brand, text="MUSIC DOWNLOADER", font=_font(7, "bold"),
+        ctk.CTkLabel(brand, text=__app_subtitle__.upper(), font=_font(7, "bold"),
                      text_color=C["text_dim"]).pack(anchor="w", padx=20)
 
         Divider(self).pack(fill="x", pady=(8, 12), padx=14)
@@ -1479,7 +1601,7 @@ class Sidebar(ctk.CTkFrame):
             self._items[tab_id] = item
 
         Divider(self).pack(side="bottom", fill="x", padx=14, pady=(0, 8))
-        ctk.CTkLabel(self, text="v2.1  ·  yt-dlp", font=_font(8),
+        ctk.CTkLabel(self, text=f"v{__version__}  ·  yt-dlp", font=_font(8),
                      text_color=C["text_dim"]).pack(side="bottom", pady=(0, 4))
 
         self._active = "dashboard"
@@ -1546,6 +1668,11 @@ class DjTracksDwCrackApp:
 
         # Register the UI callback via the public setter.
         self._ctrl.set_on_task_update(self._download_panel.on_task_update)
+
+        # Resume any tasks that were pending when the app last closed.
+        restored = self._ctrl.resume_restored_queue()
+        if restored:
+            self._toast(f"Reanudando {len(restored)} descarga{'s' if len(restored) != 1 else ''} pendiente{'s' if len(restored) != 1 else ''}", "info")
 
     def _set_icon(self) -> None:
         assets = Path(__file__).parent.parent / "assets"

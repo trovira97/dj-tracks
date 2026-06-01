@@ -10,11 +10,13 @@ Downloads run in a thread pool, so multiple tracks can download concurrently
 from __future__ import annotations
 
 import json
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
+from core.queue_persistence        import load_queue, save_queue
 from core.search_manager           import SearchManager
 from downloader.audio_downloader   import AudioDownloader, DownloadStatus, DownloadTask
 from downloader.quality_manager    import get_profile
@@ -54,17 +56,16 @@ class AppController:
         self._config: Dict = {}
         self._load_config()
 
-        sp_cfg = self._config.get("spotify", {})
-        am_cfg = self._config.get("apple_music", {})
-        sc_cfg = self._config.get("soundcloud", {})
+        # Credentials: env vars override the JSON config (more secure for CI / shared boxes).
+        sp_id     = os.environ.get("SPOTIFY_CLIENT_ID")     or self._config.get("spotify", {}).get("client_id",     "")
+        sp_secret = os.environ.get("SPOTIFY_CLIENT_SECRET") or self._config.get("spotify", {}).get("client_secret", "")
+        sc_id     = os.environ.get("SOUNDCLOUD_CLIENT_ID")  or self._config.get("soundcloud", {}).get("client_id",  "")
+        am_key    = os.environ.get("APPLE_MUSIC_API_KEY")   or self._config.get("apple_music", {}).get("api_key",   "")
 
         self.search_manager = SearchManager(
-            spotify     = SpotifyProvider(
-                sp_cfg.get("client_id", ""),
-                sp_cfg.get("client_secret", ""),
-            ),
-            apple_music = AppleMusicProvider(am_cfg.get("api_key", "")),
-            soundcloud  = SoundCloudProvider(sc_cfg.get("client_id", "")),
+            spotify     = SpotifyProvider(sp_id, sp_secret),
+            apple_music = AppleMusicProvider(am_key),
+            soundcloud  = SoundCloudProvider(sc_id),
         )
         self.downloader = AudioDownloader(on_progress=self._on_download_progress)
 
@@ -79,6 +80,9 @@ class AppController:
             max_workers=max(1, max_workers),
             thread_name_prefix="dj-dl",
         )
+
+        # Persisted queue is loaded explicitly by the UI (after callbacks are wired).
+        self._restored_tasks: List[DownloadTask] = load_queue()
 
     # ── Public callback management ────────────────────────────────────────────
 
@@ -254,12 +258,40 @@ class AppController:
             log.error(f"[Controller] Error en post-proceso: {exc}")
 
     def shutdown(self) -> None:
-        """Shut down the thread pool gracefully."""
+        """
+        Persist any pending tasks, then shut down the thread pool.
+
+        Called from the UI when the user closes the window.
+        """
+        # Save the still-pending portion so they're restored next launch.
+        with self._queue_lock:
+            snapshot = list(self._queue)
+        save_queue(snapshot)
+
         try:
             self._executor.shutdown(wait=False, cancel_futures=True)
         except TypeError:
             # cancel_futures requires Python 3.9+
             self._executor.shutdown(wait=False)
+
+    def resume_restored_queue(self) -> List[DownloadTask]:
+        """
+        Re-enqueue previously persisted tasks and return them.
+
+        The UI calls this once after registering its update callback so the
+        download panel can pre-populate its rows.  Each restored task is
+        scheduled on the executor exactly like a freshly added one.
+        """
+        restored = list(self._restored_tasks)
+        self._restored_tasks = []
+        for task in restored:
+            with self._queue_lock:
+                self._queue.append(task)
+            self._notify(task)
+            self._executor.submit(self._process_task, task)
+        if restored:
+            log.info(f"[Controller] Re-encoladas {len(restored)} tareas pendientes restauradas")
+        return restored
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
 

@@ -105,17 +105,19 @@ def ensure_dir(path: Union[str, Path]) -> Path:
     return p
 
 
-def format_filesize(size_bytes: int) -> str:
+def format_filesize(size_bytes: float) -> str:
     """
-    Format *size_bytes* as a human-readable string.
+    Format *size_bytes* as a human-readable string with one decimal place.
 
     Examples::
 
         format_filesize(1024)        # "1.0 KB"
+        format_filesize(1536)        # "1.5 KB"
         format_filesize(10_485_760)  # "10.0 MB"
     """
+    size = float(size_bytes)
     for unit in ("B", "KB", "MB", "GB"):
-        if size_bytes < 1024:
-            return f"{size_bytes:.1f} {unit}"
-        size_bytes //= 1024
-    return f"{size_bytes:.1f} TB"
+        if size < 1024:
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
