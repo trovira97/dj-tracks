@@ -16,6 +16,7 @@ from typing import Dict, List, Optional
 
 from providers import MusicProvider, TrackInfo
 from providers.applemusic_provider  import AppleMusicProvider
+from providers.bandcamp_provider    import BandcampProvider
 from providers.soundcloud_provider  import SoundCloudProvider
 from providers.spotify_provider     import SpotifyProvider
 from utils.logger     import log
@@ -45,6 +46,7 @@ class SearchManager:
         spotify:     Optional[SpotifyProvider]    = None,
         apple_music: Optional[AppleMusicProvider] = None,
         soundcloud:  Optional[SoundCloudProvider] = None,
+        bandcamp:    Optional[BandcampProvider]   = None,
     ) -> None:
         self._providers: Dict[Platform, MusicProvider] = {}
 
@@ -54,10 +56,14 @@ class SearchManager:
             self._providers[Platform.APPLE_MUSIC] = apple_music
         if soundcloud:
             self._providers[Platform.SOUNDCLOUD]  = soundcloud
+        if bandcamp:
+            self._providers[Platform.BANDCAMP]    = bandcamp
 
-        # Apple Music is always available (public iTunes Search API).
+        # Apple Music and Bandcamp are always available (no credentials).
         if Platform.APPLE_MUSIC not in self._providers:
             self._providers[Platform.APPLE_MUSIC] = AppleMusicProvider()
+        if Platform.BANDCAMP not in self._providers:
+            self._providers[Platform.BANDCAMP] = BandcampProvider()
 
     # ── Public API ─────────────────────────────────────────────────────────────
 

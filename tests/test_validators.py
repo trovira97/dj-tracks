@@ -49,6 +49,8 @@ class TestDetectPlatform:
         ("https://music.apple.com/us/playlist/abc",    Platform.APPLE_MUSIC),
         ("https://soundcloud.com/artist/track",        Platform.SOUNDCLOUD),
         ("https://www.soundcloud.com/user",            Platform.SOUNDCLOUD),
+        ("https://artist.bandcamp.com/track/song",     Platform.BANDCAMP),
+        ("https://artist.bandcamp.com/album/x",        Platform.BANDCAMP),
         ("https://youtube.com/watch?v=xyz",            Platform.UNKNOWN),
         ("not a url",                                  Platform.UNKNOWN),
     ])

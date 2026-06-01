@@ -16,6 +16,7 @@ class Platform(str, Enum):
     SPOTIFY     = "spotify"
     APPLE_MUSIC = "applemusic"
     SOUNDCLOUD  = "soundcloud"
+    BANDCAMP    = "bandcamp"
     UNKNOWN     = "unknown"
 
 
@@ -57,6 +58,8 @@ def detect_platform(url: str) -> Platform:
         return Platform.APPLE_MUSIC
     if "soundcloud.com" in lower:
         return Platform.SOUNDCLOUD
+    if "bandcamp.com" in lower:
+        return Platform.BANDCAMP
     return Platform.UNKNOWN
 
 

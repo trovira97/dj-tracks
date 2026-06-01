@@ -23,6 +23,7 @@ from downloader.quality_manager    import get_profile
 from metadata.metadata_writer      import download_cover, verify_and_fix, write_metadata
 from providers                     import TrackInfo
 from providers.applemusic_provider import AppleMusicProvider
+from providers.bandcamp_provider   import BandcampProvider
 from providers.soundcloud_provider import SoundCloudProvider
 from providers.spotify_provider    import SpotifyProvider
 from utils.file_utils              import ensure_dir
@@ -67,6 +68,7 @@ class AppController:
             spotify     = SpotifyProvider(sp_id, sp_secret),
             apple_music = AppleMusicProvider(am_key),
             soundcloud  = SoundCloudProvider(sc_id),
+            bandcamp    = BandcampProvider(),
         )
         self.downloader = AudioDownloader(on_progress=self._on_download_progress)
 
@@ -144,6 +146,7 @@ class AppController:
             "spotify":    Platform.SPOTIFY,
             "applemusic": Platform.APPLE_MUSIC,
             "soundcloud": Platform.SOUNDCLOUD,
+            "bandcamp":   Platform.BANDCAMP,
             "auto":       Platform.UNKNOWN,
         }
         platform = mapping.get(platform_str.lower(), Platform.UNKNOWN)
@@ -160,6 +163,7 @@ class AppController:
         "spotify":    "Spotify",
         "applemusic": "Apple Music",
         "soundcloud": "SoundCloud",
+        "bandcamp":   "Bandcamp",
     }
 
     def add_to_queue(self, track: TrackInfo) -> DownloadTask:

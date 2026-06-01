@@ -203,7 +203,14 @@ class AudioDownloader:
         track   = task.track
         profile = task.profile
 
-        if track.platform == Platform.SOUNDCLOUD.value and track.source_url:
+        # Platforms whose source_url can be handed straight to yt-dlp
+        # (no YouTube fallback needed because yt-dlp downloads from them
+        # natively).
+        direct_url_platforms = {
+            Platform.SOUNDCLOUD.value,
+            Platform.BANDCAMP.value,
+        }
+        if track.platform in direct_url_platforms and track.source_url:
             download_url = track.source_url
         else:
             download_url = f"ytsearch1:{self._build_yt_query(track)}"

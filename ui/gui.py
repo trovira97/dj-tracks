@@ -85,7 +85,7 @@ THEMES: Dict[str, Dict[str, str]] = {
         "accent": "#00C8FF", "accent_dim": "#0088AA", "accent2": "#7C3AED",
         "text": "#DCE0F5", "text_mid": "#8088AA", "text_dim": "#505070",
         "success": "#00D48A", "error": "#FF4466", "warning": "#FFB020",
-        "spotify": "#1DB954", "apple": "#FC3C44", "sc": "#FF5500",
+        "spotify": "#1DB954", "apple": "#FC3C44", "sc": "#FF5500", "bc": "#629AA9",
         "done_tint": "#0D1F18", "error_tint": "#1F0D12",
     },
     "Neon Blue": {
@@ -95,7 +95,7 @@ THEMES: Dict[str, Dict[str, str]] = {
         "accent": "#1E90FF", "accent_dim": "#0055CC", "accent2": "#00DDCC",
         "text": "#D0E8FF", "text_mid": "#5878AA", "text_dim": "#2C4060",
         "success": "#00FF99", "error": "#FF3366", "warning": "#FFCC00",
-        "spotify": "#1DB954", "apple": "#FC3C44", "sc": "#FF5500",
+        "spotify": "#1DB954", "apple": "#FC3C44", "sc": "#FF5500", "bc": "#629AA9",
         "done_tint": "#0A2018", "error_tint": "#200810",
     },
     "Neon Purple": {
@@ -105,7 +105,7 @@ THEMES: Dict[str, Dict[str, str]] = {
         "accent": "#A020FF", "accent_dim": "#6010CC", "accent2": "#FF20AA",
         "text": "#EED0FF", "text_mid": "#7848AA", "text_dim": "#4C2C66",
         "success": "#20FF80", "error": "#FF2050", "warning": "#FFAA20",
-        "spotify": "#1DB954", "apple": "#FC3C44", "sc": "#FF5500",
+        "spotify": "#1DB954", "apple": "#FC3C44", "sc": "#FF5500", "bc": "#629AA9",
         "done_tint": "#0A1C12", "error_tint": "#1C060C",
     },
     "Carbon Black": {
@@ -115,7 +115,7 @@ THEMES: Dict[str, Dict[str, str]] = {
         "accent": "#FF6B00", "accent_dim": "#CC5500", "accent2": "#FFB800",
         "text": "#F0EEE8", "text_mid": "#888880", "text_dim": "#505048",
         "success": "#00CC66", "error": "#FF3333", "warning": "#FFCC00",
-        "spotify": "#1DB954", "apple": "#FC3C44", "sc": "#FF5500",
+        "spotify": "#1DB954", "apple": "#FC3C44", "sc": "#FF5500", "bc": "#629AA9",
         "done_tint": "#0C1A10", "error_tint": "#1A0808",
     },
 }
@@ -125,7 +125,10 @@ C: Dict[str, str] = dict(THEMES["Dark Pro"])
 
 PLATFORM_COLORS: Dict[str, str] = {}
 PLATFORM_LABELS: Dict[str, str] = {
-    "spotify": "SPOTIFY", "applemusic": "APPLE MUSIC", "soundcloud": "SOUNDCLOUD",
+    "spotify":    "SPOTIFY",
+    "applemusic": "APPLE MUSIC",
+    "soundcloud": "SOUNDCLOUD",
+    "bandcamp":   "BANDCAMP",
 }
 
 
@@ -135,7 +138,10 @@ def apply_theme(name: str) -> None:
     t = THEMES.get(name, THEMES["Dark Pro"])
     C.update(t)
     PLATFORM_COLORS.update({
-        "spotify": C["spotify"], "applemusic": C["apple"], "soundcloud": C["sc"],
+        "spotify":    C["spotify"],
+        "applemusic": C["apple"],
+        "soundcloud": C["sc"],
+        "bandcamp":   C["bc"],
     })
 
 
@@ -790,7 +796,8 @@ class DashboardPanel(ctk.CTkFrame):
             for w in self._plat_frame.winfo_children():
                 w.destroy()
             total = max(stats["total"], 1)
-            for plat, sym in [("spotify", "Spotify"), ("applemusic", "Apple"), ("soundcloud", "SoundCl.")]:
+            for plat, sym in [("spotify", "Spotify"), ("applemusic", "Apple"),
+                               ("soundcloud", "SoundCl."), ("bandcamp", "Bandcamp")]:
                 n     = stats["by_platform"].get(plat, 0)
                 pct   = n / total
                 color = PLATFORM_COLORS.get(plat, C["text_dim"])
@@ -834,9 +841,14 @@ class DashboardPanel(ctk.CTkFrame):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SearchPanel(ctk.CTkFrame):
-    _PLATFORMS    = ["auto", "spotify", "applemusic", "soundcloud"]
-    _PLAT_DISPLAY = {"auto": "Todas", "spotify": "Spotify",
-                     "applemusic": "Apple Music", "soundcloud": "SoundCloud"}
+    _PLATFORMS    = ["auto", "spotify", "applemusic", "soundcloud", "bandcamp"]
+    _PLAT_DISPLAY = {
+        "auto":       "Todas",
+        "spotify":    "Spotify",
+        "applemusic": "Apple Music",
+        "soundcloud": "SoundCloud",
+        "bandcamp":   "Bandcamp",
+    }
 
     def __init__(self, parent, controller: AppController,
                  on_add_track: Callable, **kw):
@@ -1049,7 +1061,8 @@ class SearchPanel(ctk.CTkFrame):
         from collections import Counter
         counts = Counter(t.platform for t in results)
         parts  = []
-        for plat, sym in [("spotify", "SP"), ("applemusic", "AM"), ("soundcloud", "SC")]:
+        for plat, sym in [("spotify", "SP"), ("applemusic", "AM"),
+                           ("soundcloud", "SC"), ("bandcamp", "BC")]:
             if counts.get(plat, 0):
                 parts.append(f"{sym} {counts[plat]}")
         breakdown = "  ·  " + "  ".join(parts) if parts else ""
@@ -1272,10 +1285,10 @@ class HistoryPanel(ctk.CTkFrame):
                          side="left", fill="x", expand=True, padx=(0, 8))
 
         self._plat_var = ctk.StringVar(value="Todas")
-        ctk.CTkOptionMenu(filters, values=["Todas", "Spotify", "Apple Music", "SoundCloud"],
+        ctk.CTkOptionMenu(filters, values=["Todas", "Spotify", "Apple Music", "SoundCloud", "Bandcamp"],
                           variable=self._plat_var, fg_color=C["surface"],
                           button_color=C["border"], dropdown_fg_color=C["card"],
-                          font=_font(10), text_color=C["text"], width=130, height=32,
+                          font=_font(10), text_color=C["text"], width=140, height=32,
                           command=lambda _: self._reload(reset=True)).pack(side="left", padx=(0, 8))
 
         self._status_var = ctk.StringVar(value="Todos")
@@ -1322,7 +1335,8 @@ class HistoryPanel(ctk.CTkFrame):
             self._page = 0
 
         plat_map   = {"Todas": "", "Spotify": "spotify",
-                      "Apple Music": "applemusic", "SoundCloud": "soundcloud"}
+                      "Apple Music": "applemusic", "SoundCloud": "soundcloud",
+                      "Bandcamp": "bandcamp"}
         status_map = {"Todos": "", "Completados": "done", "Errores": "error"}
 
         records, total = self._history.filter(

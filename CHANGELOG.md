@@ -6,6 +6,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Bandcamp provider**: search, URL resolution, and direct download
+  (bypasses YouTube fallback). Uses the public `bcsearch_public_api`
+  endpoint — no credentials required. Bandcamp results appear alongside
+  Spotify / Apple Music / SoundCloud across the search, history,
+  dashboard, and download panels.
+- Bandcamp chip in the search filter row.
+- Bandcamp filter in the history panel.
+- Bandcamp bar in the dashboard platform breakdown.
+- Bandcamp colour (`bc = #629AA9`) added to every theme.
+- New `Platform.BANDCAMP` enum value + URL detection in `validators`.
+- 12 new pytest tests for the Bandcamp provider (offline, mocked HTTP).
+- 2 new tests covering Bandcamp URL detection in `detect_platform`.
+
+### Changed
+- `AudioDownloader` now treats Bandcamp the same way as SoundCloud:
+  when the track has a `source_url`, hand it straight to yt-dlp instead
+  of doing a YouTube text search. Means cleaner downloads with the
+  original artist's audio.
+- `subfolder_per_platform` setting now produces a `Bandcamp/` sub-folder
+  too when enabled.
+- Friendly error messages for common yt-dlp failures (403, 404, 429,
+  age-restricted, geo-blocked, etc.) shown in the queue rows; full
+  traceback still goes to logs.
+
+### Fixed
+- Toast crash on CustomTkinter >= 5.2: width/height moved from `.place()`
+  to the widget constructor.
+
+### Added
 - **Standalone installer build pipeline** (`build/`):
   - PyInstaller spec bundling ffmpeg, assets, and CustomTkinter data.
   - Inno Setup installer script — per-user install, no admin required.
