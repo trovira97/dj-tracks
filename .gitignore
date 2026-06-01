@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Local dependencies installed by the launcher workflow
+.vendor/
+
+# App runtime output
+downloads/
+logs/
+
+# Local user configuration / credentials  ← NEVER commit these
+config/settings.json
+config/history.json
+
+# Large local binaries
+ffmpeg.exe
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

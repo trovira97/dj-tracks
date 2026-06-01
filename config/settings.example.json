@@ -1,0 +1,20 @@
+{
+    "download_folder": "downloads",
+    "preferred_format": "mp3",
+    "preferred_quality": "320k",
+    "folder_structure": "{artist}/{album}/{artist} - {title}",
+    "auto_fix_metadata": true,
+    "normalize_volume": false,
+    "threads": 4,
+    "spotify": {
+        "client_id": "",
+        "client_secret": ""
+    },
+    "apple_music": {
+        "api_key": ""
+    },
+    "soundcloud": {
+        "client_id": ""
+    },
+    "log_level": "INFO"
+}
