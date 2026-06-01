@@ -10,6 +10,10 @@ __pycache__/
 downloads/
 logs/
 
+# Build artifacts (PyInstaller + Inno Setup output)
+dist/
+build_temp/
+
 # Local user configuration / credentials  ← NEVER commit these
 config/settings.json
 config/history.json

@@ -29,6 +29,7 @@ from core.controller import AppController
 from downloader.audio_downloader import DownloadStatus, DownloadTask
 from providers import TrackInfo
 from utils.history_manager import HistoryManager
+from utils.paths import bundled_resource
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1675,10 +1676,9 @@ class DjTracksDwCrackApp:
             self._toast(f"Reanudando {len(restored)} descarga{'s' if len(restored) != 1 else ''} pendiente{'s' if len(restored) != 1 else ''}", "info")
 
     def _set_icon(self) -> None:
-        assets = Path(__file__).parent.parent / "assets"
         try:
-            ico = assets / "icon.ico"
-            png = assets / "logo.png"
+            ico = bundled_resource("assets/icon.ico")
+            png = bundled_resource("assets/logo.png")
             if ico.exists():
                 self._root.iconbitmap(str(ico))
             elif png.exists():

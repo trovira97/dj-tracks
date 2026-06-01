@@ -108,7 +108,10 @@ def _bootstrap() -> None:
 
 def main() -> None:
     """Initialise the controller and start the GUI main loop."""
-    _bootstrap()
+    # When running from a PyInstaller bundle, all deps are already inside —
+    # skip the runtime pip bootstrap.
+    if not getattr(sys, "frozen", False):
+        _bootstrap()
 
     from core.controller import AppController
     from ui.gui          import DjTracksDwCrackApp

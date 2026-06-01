@@ -19,9 +19,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from utils.logger import log
+from utils.paths  import config_dir
 
 
-HISTORY_PATH = Path(__file__).parent.parent / "config" / "history.json"
+HISTORY_PATH = config_dir() / "history.json"
 
 # Maximum number of records kept in memory and on disk.
 _MAX_RECORDS = 2_000

@@ -3,6 +3,27 @@
 All notable changes to **DJ Tracks** are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- **Standalone installer build pipeline** (`build/`):
+  - PyInstaller spec bundling ffmpeg, assets, and CustomTkinter data.
+  - Inno Setup installer script — per-user install, no admin required.
+  - One-click `build.bat` that runs the full pipeline.
+  - Full build README with troubleshooting.
+- `utils/paths.py` — central resolver for runtime data paths. In source
+  mode keeps the existing layout; in frozen mode (PyInstaller bundle)
+  redirects config / history / queue / logs to `%APPDATA%/DjTracks/`.
+
+### Changed
+- `logger`, `controller`, `history_manager`, and `queue_persistence` now
+  resolve their paths via `utils.paths` so installed and source modes
+  both work correctly.
+- `main.py` skips the runtime pip bootstrap when running from a frozen
+  bundle (all deps are already inside).
+- GUI icon and ffmpeg lookup use `bundled_resource()` so they work both
+  in source mode and when extracted from the PyInstaller bundle.
+
 ## [2.1.0] — 2026-06-01
 
 ### Added

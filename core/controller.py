@@ -27,6 +27,7 @@ from providers.soundcloud_provider import SoundCloudProvider
 from providers.spotify_provider    import SpotifyProvider
 from utils.file_utils              import ensure_dir
 from utils.logger                  import log
+from utils.paths                   import config_dir
 from utils.validators              import Platform
 
 
@@ -49,7 +50,7 @@ class AppController:
     - Notify the UI layer via an optional :attr:`_on_task_update` callback.
     """
 
-    CONFIG_PATH: Path = Path(__file__).parent.parent / "config" / "settings.json"
+    CONFIG_PATH: Path = config_dir() / "settings.json"
 
     def __init__(self, on_task_update: Optional[UpdateCallback] = None) -> None:
         self._on_task_update: Optional[UpdateCallback] = on_task_update

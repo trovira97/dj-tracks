@@ -17,9 +17,10 @@ from downloader.audio_downloader import DownloadStatus, DownloadTask
 from downloader.quality_manager  import get_profile
 from providers                   import TrackInfo
 from utils.logger                import log
+from utils.paths                 import config_dir
 
 
-QUEUE_PATH = Path(__file__).parent.parent / "config" / "queue.json"
+QUEUE_PATH = config_dir() / "queue.json"
 
 _TERMINAL = {DownloadStatus.DONE, DownloadStatus.ERROR, DownloadStatus.CANCELLED}
 

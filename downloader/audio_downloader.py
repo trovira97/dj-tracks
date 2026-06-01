@@ -29,6 +29,7 @@ from downloader.quality_manager import QualityProfile, get_profile
 from providers import TrackInfo
 from utils.file_utils import build_output_path, get_unique_path
 from utils.logger import log
+from utils.paths import bundled_resource
 from utils.validators import Platform
 
 
@@ -139,9 +140,9 @@ class AudioDownloader:
         home   = Path.home()
         suffix = ".exe" if os.name == "nt" else ""
         candidates = [
+            bundled_resource(f"ffmpeg{suffix}"),          # frozen exe / source root
             home / ".spotdl"        / f"ffmpeg{suffix}",
             home / ".config/spotdl" / f"ffmpeg{suffix}",
-            Path(__file__).parent.parent / f"ffmpeg{suffix}",
         ]
         for c in candidates:
             if c.exists():

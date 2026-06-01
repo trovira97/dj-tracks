@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import logging
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
+
+from utils.paths import logs_dir
 
 
 def get_logger(name: str = "dj_tracks") -> logging.Logger:
@@ -32,8 +33,7 @@ def get_logger(name: str = "dj_tracks") -> logging.Logger:
 
     logger.setLevel(logging.DEBUG)
 
-    log_dir = Path(__file__).parent.parent / "logs"
-    log_dir.mkdir(exist_ok=True)
+    log_dir = logs_dir()
 
     # ── Rotating file handler (DEBUG+) ────────────────────────────────────────
     _fmt = logging.Formatter(
