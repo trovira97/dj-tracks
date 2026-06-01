@@ -120,3 +120,20 @@ class TestHistoryManager:
         self._add_record(hm)
         hm.clear()
         assert hm.all() == []
+
+    def test_delete_by_id(self, tmp_history):
+        from utils.history_manager import HistoryManager
+        hm = HistoryManager()
+        r1 = self._add_record(hm, title="Keep")
+        r2 = self._add_record(hm, title="Delete me")
+        assert hm.delete(r2.id) is True
+        remaining = hm.all()
+        assert len(remaining) == 1
+        assert remaining[0].id == r1.id
+
+    def test_delete_missing_returns_false(self, tmp_history):
+        from utils.history_manager import HistoryManager
+        hm = HistoryManager()
+        self._add_record(hm)
+        assert hm.delete("nonexistent-id") is False
+        assert len(hm.all()) == 1

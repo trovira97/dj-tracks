@@ -183,6 +183,11 @@ class _LRUImageCache:
         with self._lock:
             self._cache.clear()
 
+    def size(self) -> int:
+        """Number of cached images currently held."""
+        with self._lock:
+            return len(self._cache)
+
 
 _COVER_CACHE = _LRUImageCache(maxsize=300)
 
@@ -613,12 +618,17 @@ class QueueRow(ctk.CTkFrame):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class HistoryRow(ctk.CTkFrame):
-    """One row in the history panel table.  Double-click opens the file in
-    the system file manager; right-click shows a context menu."""
+    """One row in the history panel table.
 
-    def __init__(self, parent, record, **kw):
+    - Double-click → opens the file in the system file manager.
+    - Right-click  → context menu (open file, open folder, copy path).
+    - ✕ button     → removes this record from the history.
+    """
+
+    def __init__(self, parent, record, on_delete: Optional[Callable] = None, **kw):
         super().__init__(parent, fg_color=C["card"], corner_radius=5, **kw)
-        self._record = record
+        self._record    = record
+        self._on_delete = on_delete
         r  = record
         ok = r.status == "done"
         pc = PLATFORM_COLORS.get(r.platform, C["text_dim"])
@@ -637,8 +647,17 @@ class HistoryRow(ctk.CTkFrame):
         ctk.CTkLabel(info, text=r.artist or "—", font=_font(10),
                      text_color=C["text_mid"], anchor="w").pack(fill="x")
 
+        # Delete button (right-most column).
+        self._del_btn = ctk.CTkButton(
+            self, text="✕", width=28, height=28, font=_font(11, "bold"),
+            fg_color="transparent", hover_color=C["error_tint"],
+            text_color=C["text_dim"], corner_radius=5,
+            command=self._handle_delete,
+        )
+        self._del_btn.pack(side="right", padx=(0, 8))
+
         meta = ctk.CTkFrame(self, fg_color="transparent", width=200)
-        meta.pack(side="right", fill="y", padx=12)
+        meta.pack(side="right", fill="y", padx=(0, 4))
         meta.pack_propagate(False)
         ctk.CTkLabel(meta, text=PLATFORM_LABELS.get(r.platform, r.platform.upper()),
                      font=_font(8, "bold"), text_color=pc, anchor="e").pack(anchor="e", pady=(8, 2))
@@ -647,16 +666,23 @@ class HistoryRow(ctk.CTkFrame):
         ctk.CTkLabel(meta, text=r.date_str,
                      font=_font(8, mono=True), text_color=C["text_dim"], anchor="e").pack(anchor="e")
 
-        # Bind interactions on every child so clicks anywhere on the row work.
-        self._bind_recursive(self, "<Double-Button-1>", self._open_file)
-        self._bind_recursive(self, "<Button-3>",        self._show_menu)
+        # Bind interactions on every child so clicks anywhere on the row work,
+        # but skip the delete button (it has its own action).
+        self._bind_recursive(self, "<Double-Button-1>", self._open_file, skip=self._del_btn)
+        self._bind_recursive(self, "<Button-3>",        self._show_menu, skip=self._del_btn)
         self._bind_recursive(self, "<Enter>", lambda _: self.configure(fg_color=C["card_hover"]))
         self._bind_recursive(self, "<Leave>", lambda _: self.configure(fg_color=C["card"]))
 
-    def _bind_recursive(self, widget, sequence: str, callback) -> None:
+    def _bind_recursive(self, widget, sequence: str, callback, skip=None) -> None:
+        if widget is skip:
+            return
         widget.bind(sequence, callback)
         for child in widget.winfo_children():
-            self._bind_recursive(child, sequence, callback)
+            self._bind_recursive(child, sequence, callback, skip=skip)
+
+    def _handle_delete(self) -> None:
+        if self._on_delete:
+            self._on_delete(self._record)
 
     def _open_file(self, _event=None) -> None:
         if self._record.path:
@@ -866,7 +892,7 @@ class SearchPanel(ctk.CTkFrame):
             btn.pack(side="left", padx=(0, 6))
             self._chip_btns[plat] = btn
 
-        self._view_var = ctk.StringVar(value="Lista")
+        self._view_var = ctk.StringVar(value="Cuadrícula")
         ctk.CTkSegmentedButton(
             frow, values=["Lista", "Cuadrícula"],
             variable=self._view_var, font=_font(10),
@@ -1201,11 +1227,13 @@ class DownloadPanel(ctk.CTkFrame):
 class HistoryPanel(ctk.CTkFrame):
     PAGE_SIZE = 40
 
-    def __init__(self, parent, history: HistoryManager, **kw):
+    def __init__(self, parent, history: HistoryManager,
+                 on_dashboard_refresh: Optional[Callable] = None, **kw):
         super().__init__(parent, fg_color=C["panel"], corner_radius=0, **kw)
-        self._history        = history
-        self._page           = 0
-        self._total          = 0
+        self._history              = history
+        self._on_dashboard_refresh = on_dashboard_refresh
+        self._page                 = 0
+        self._total                = 0
         self._build()
 
     def _build(self) -> None:
@@ -1309,7 +1337,8 @@ class HistoryPanel(ctk.CTkFrame):
         else:
             self._empty_lbl.pack_forget()
             for rec in records:
-                HistoryRow(self._list, rec).pack(fill="x", pady=(0, 3))
+                HistoryRow(self._list, rec, on_delete=self._delete_record).pack(
+                    fill="x", pady=(0, 3))
 
         pages = max(1, (total + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
         self._count_lbl.configure(text=f"HISTORIAL  ·  {total} tracks")
@@ -1319,6 +1348,14 @@ class HistoryPanel(ctk.CTkFrame):
 
     def refresh(self) -> None:
         self._reload()
+
+    def _delete_record(self, record) -> None:
+        """Remove one record from the history and refresh the view."""
+        if self._history.delete(record.id):
+            # If the current page is now empty (last item removed), step back.
+            self._reload()
+            if self._on_dashboard_refresh:
+                self._on_dashboard_refresh()
 
     def _prev_page(self) -> None:
         if self._page > 0:
@@ -1537,10 +1574,12 @@ class SettingsPanel(ctk.CTkFrame):
         SectionLabel(scroll, "Mantenimiento").pack(anchor="w", pady=(0, 8))
         maint_card = self._card(scroll)
 
-        self._maint_button(maint_card,
-                           label="Limpiar caché de portadas",
-                           hint="Libera memoria usada por las imágenes descargadas",
-                           command=self._handle_clear_cache)
+        cache_n = _COVER_CACHE.size()
+        self._maint_button(
+            maint_card,
+            label=f"Limpiar caché de imágenes",
+            hint=f"Libera la memoria usada por las {cache_n} portadas en caché",
+            command=self._handle_clear_cache)
         Divider(maint_card).pack(fill="x", padx=14, pady=2)
         self._maint_button(maint_card,
                            label="Borrar historial de descargas",
@@ -1920,7 +1959,9 @@ class DjTracksDwCrackApp:
             self._content_area, self._ctrl, self._history,
             on_count_change=self._on_count_change,
             on_task_complete=self._on_task_complete)
-        self._history_panel   = HistoryPanel(self._content_area, history=self._history)
+        self._history_panel   = HistoryPanel(
+            self._content_area, history=self._history,
+            on_dashboard_refresh=lambda: self._dashboard_panel.refresh())
         self._settings_panel  = SettingsPanel(
             self._content_area, self._ctrl,
             on_save              = self._on_settings_saved,
@@ -2015,8 +2056,12 @@ class DjTracksDwCrackApp:
         self._toast("Historial borrado", "success")
 
     def _on_clear_cover_cache(self) -> None:
+        n = _COVER_CACHE.size()
         _COVER_CACHE.clear()
-        self._toast("Caché de portadas vaciada", "success")
+        if n:
+            self._toast(f"Caché vaciada — {n} imágen{'es' if n != 1 else ''} liberadas", "success")
+        else:
+            self._toast("La caché ya estaba vacía", "info")
 
     def _on_reset_config(self) -> None:
         self._ctrl.reset_config()

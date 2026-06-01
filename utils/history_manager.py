@@ -252,3 +252,20 @@ class HistoryManager:
         with self._lock:
             self._records.clear()
         self._save_snapshot([])
+
+    def delete(self, record_id: str) -> bool:
+        """
+        Remove a single record by its ``id``.
+
+        Returns:
+            ``True`` if the record was found and removed, ``False`` otherwise.
+        """
+        with self._lock:
+            before = len(self._records)
+            self._records = [r for r in self._records if r.id != record_id]
+            removed = len(self._records) < before
+            snapshot = list(self._records) if removed else None
+
+        if removed and snapshot is not None:
+            self._save_snapshot(snapshot)
+        return removed
