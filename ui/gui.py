@@ -1078,12 +1078,15 @@ class SearchPanel(ctk.CTkFrame):
 
 class DownloadPanel(ctk.CTkFrame):
     def __init__(self, parent, controller: AppController, history: HistoryManager,
-                 on_count_change: Optional[Callable] = None, **kw):
+                 on_count_change: Optional[Callable] = None,
+                 on_task_complete: Optional[Callable] = None, **kw):
         super().__init__(parent, fg_color=C["panel"], corner_radius=0, **kw)
-        self._ctrl           = controller
-        self._history        = history
+        self._ctrl            = controller
+        self._history         = history
         self._on_count_change = on_count_change
+        self._on_task_complete = on_task_complete
         self._rows: Dict[str, QueueRow] = {}
+        self._completed_ids: set = set()   # tracks for which we've already fired on_task_complete
         self._build()
 
     def _build(self) -> None:
@@ -1139,6 +1142,15 @@ class DownloadPanel(ctk.CTkFrame):
 
         if task.status in (DownloadStatus.DONE, DownloadStatus.ERROR):
             self._history.add_from_task(task)
+
+        # Fire the completion callback exactly once per task.
+        if task.status == DownloadStatus.DONE and task.task_id not in self._completed_ids:
+            self._completed_ids.add(task.task_id)
+            if self._on_task_complete:
+                try:
+                    self._on_task_complete(task)
+                except Exception:
+                    pass
 
         self._refresh_counter()
 
@@ -1341,11 +1353,18 @@ class HistoryPanel(ctk.CTkFrame):
 class SettingsPanel(ctk.CTkFrame):
     def __init__(self, parent, controller: AppController,
                  on_save: Optional[Callable] = None,
-                 on_theme_change: Optional[Callable] = None, **kw):
+                 on_theme_change: Optional[Callable] = None,
+                 on_clear_history: Optional[Callable] = None,
+                 on_clear_cover_cache: Optional[Callable] = None,
+                 on_reset_config: Optional[Callable] = None,
+                 **kw):
         super().__init__(parent, fg_color=C["panel"], corner_radius=0, **kw)
-        self._ctrl            = controller
-        self._on_save         = on_save
-        self._on_theme_change = on_theme_change
+        self._ctrl                 = controller
+        self._on_save              = on_save
+        self._on_theme_change      = on_theme_change
+        self._on_clear_history     = on_clear_history
+        self._on_clear_cover_cache = on_clear_cover_cache
+        self._on_reset_config      = on_reset_config
         self._build()
 
     def _build(self) -> None:
@@ -1441,6 +1460,53 @@ class SettingsPanel(ctk.CTkFrame):
                      text="Variables:  {artist}   {album}   {title}   {year}",
                      font=_font(9), text_color=C["text_dim"]).pack(anchor="w", padx=14, pady=(0, 14))
 
+        Divider(dl_card).pack(fill="x", padx=14, pady=2)
+
+        # Behaviour toggles
+        self._auto_fix_var      = ctk.BooleanVar(value=self._ctrl.get_config("auto_fix_metadata", True))
+        self._subfolder_var     = ctk.BooleanVar(value=self._ctrl.get_config("subfolder_per_platform", False))
+        self._switch_row(dl_card, "Auto-arreglar metadatos",
+                         "Corrige título / artista / álbum tras la descarga",
+                         self._auto_fix_var)
+        self._switch_row(dl_card, "Sub-carpeta por plataforma",
+                         "Crea carpetas separadas: Spotify / Apple Music / SoundCloud",
+                         self._subfolder_var)
+
+        # Parallel downloads
+        Divider(dl_card).pack(fill="x", padx=14, pady=2)
+        threads_row = ctk.CTkFrame(dl_card, fg_color="transparent")
+        threads_row.pack(fill="x", padx=14, pady=(8, 14))
+        ctk.CTkLabel(threads_row, text="Descargas paralelas",
+                     font=_font(11, "bold"), text_color=C["text"]).pack(anchor="w")
+        ctk.CTkLabel(threads_row, text="Cuántas pistas pueden descargarse a la vez (1–4)",
+                     font=_font(9), text_color=C["text_dim"]).pack(anchor="w")
+        self._threads_var = ctk.StringVar(value=str(self._ctrl.get_config("threads", 2)))
+        ctk.CTkOptionMenu(
+            threads_row, values=["1", "2", "3", "4"], variable=self._threads_var,
+            fg_color=C["surface"], button_color=C["border"],
+            button_hover_color=C["border_focus"],
+            dropdown_fg_color=C["card"], dropdown_hover_color=C["card_hover"],
+            font=_font(11), text_color=C["text"], width=70, height=30,
+        ).pack(anchor="w", pady=(6, 0))
+
+        # ── Notifications ─────────────────────────────────────────────────────
+        SectionLabel(scroll, "Notificaciones").pack(anchor="w", pady=(16, 8))
+        notif_card = self._card(scroll)
+
+        self._notify_var       = ctk.BooleanVar(value=self._ctrl.get_config("notify_on_complete", True))
+        self._open_folder_var  = ctk.BooleanVar(value=self._ctrl.get_config("open_folder_on_complete", False))
+        self._sound_var        = ctk.BooleanVar(value=self._ctrl.get_config("sound_on_complete", False))
+
+        self._switch_row(notif_card, "Mostrar aviso al completar",
+                         "Burbuja flotante cuando cada descarga termina",
+                         self._notify_var)
+        self._switch_row(notif_card, "Abrir carpeta al completar",
+                         "Lanza el Explorador en la carpeta del archivo",
+                         self._open_folder_var)
+        self._switch_row(notif_card, "Sonido al completar",
+                         "Pitido del sistema cuando termina cada descarga",
+                         self._sound_var)
+
         # ── API Credentials ───────────────────────────────────────────────────
         SectionLabel(scroll, "Credenciales de API").pack(anchor="w", pady=(16, 8))
         api_card = self._card(scroll)
@@ -1467,12 +1533,106 @@ class SettingsPanel(ctk.CTkFrame):
                           "SoundCloud: detecta Client ID automáticamente.").pack(
                               anchor="w", pady=(8, 16))
 
+        # ── Mantenimiento ─────────────────────────────────────────────────────
+        SectionLabel(scroll, "Mantenimiento").pack(anchor="w", pady=(0, 8))
+        maint_card = self._card(scroll)
+
+        self._maint_button(maint_card,
+                           label="Limpiar caché de portadas",
+                           hint="Libera memoria usada por las imágenes descargadas",
+                           command=self._handle_clear_cache)
+        Divider(maint_card).pack(fill="x", padx=14, pady=2)
+        self._maint_button(maint_card,
+                           label="Borrar historial de descargas",
+                           hint="Elimina todos los registros del historial",
+                           command=self._handle_clear_history,
+                           danger=True)
+        Divider(maint_card).pack(fill="x", padx=14, pady=2)
+        self._maint_button(maint_card,
+                           label="Restablecer ajustes",
+                           hint="Vuelve a los valores por defecto (las credenciales se conservan)",
+                           command=self._handle_reset_config,
+                           danger=True)
+
+        # ── Save button ───────────────────────────────────────────────────────
         self._save_btn = ctk.CTkButton(
             scroll, text="Guardar configuración",
             height=44, font=_font(13, "bold"),
             fg_color=C["accent"], hover_color=C["accent_dim"],
             text_color="#000", corner_radius=8, command=self._save)
-        self._save_btn.pack(fill="x")
+        self._save_btn.pack(fill="x", pady=(16, 0))
+
+    # ── Reusable building blocks ──────────────────────────────────────────────
+
+    def _switch_row(self, parent, label: str, hint: str, var: ctk.BooleanVar) -> None:
+        """Render a toggle row: label + hint on the left, switch on the right."""
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", padx=14, pady=8)
+
+        text_col = ctk.CTkFrame(row, fg_color="transparent")
+        text_col.pack(side="left", fill="x", expand=True)
+        ctk.CTkLabel(text_col, text=label, font=_font(11, "bold"),
+                     text_color=C["text"], anchor="w").pack(fill="x")
+        ctk.CTkLabel(text_col, text=hint, font=_font(9),
+                     text_color=C["text_dim"], anchor="w").pack(fill="x")
+
+        ctk.CTkSwitch(
+            row, text="", variable=var, onvalue=True, offvalue=False,
+            progress_color=C["accent"], button_color=C["text"],
+            button_hover_color=C["text_mid"], fg_color=C["surface"],
+            width=44, height=22,
+        ).pack(side="right", padx=(8, 0))
+
+    def _maint_button(self, parent, label: str, hint: str,
+                      command: Callable, danger: bool = False) -> None:
+        """Render one maintenance row with a label, hint, and an action button."""
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", padx=14, pady=10)
+
+        text_col = ctk.CTkFrame(row, fg_color="transparent")
+        text_col.pack(side="left", fill="x", expand=True)
+        ctk.CTkLabel(text_col, text=label, font=_font(11, "bold"),
+                     text_color=C["text"], anchor="w").pack(fill="x")
+        ctk.CTkLabel(text_col, text=hint, font=_font(9),
+                     text_color=C["text_dim"], anchor="w").pack(fill="x")
+
+        color  = C["error"] if danger else C["accent"]
+        ctk.CTkButton(
+            row, text="Ejecutar", width=86, height=30,
+            font=_font(10, "bold"), fg_color=color,
+            hover_color=color, text_color="#000" if not danger else "#FFF",
+            corner_radius=6, command=command,
+        ).pack(side="right", padx=(8, 0))
+
+    # ── Maintenance handlers ──────────────────────────────────────────────────
+
+    def _confirm(self, title: str, message: str) -> bool:
+        """Show a yes/no confirmation dialog.  Returns True if the user confirmed."""
+        from tkinter import messagebox
+        return messagebox.askyesno(title, message, parent=self.winfo_toplevel())
+
+    def _handle_clear_cache(self) -> None:
+        if self._on_clear_cover_cache:
+            self._on_clear_cover_cache()
+
+    def _handle_clear_history(self) -> None:
+        if self._confirm(
+            "Borrar historial",
+            "¿Seguro que quieres borrar todo el historial de descargas?\n"
+            "Esta acción no se puede deshacer.",
+        ) and self._on_clear_history:
+            self._on_clear_history()
+
+    def _handle_reset_config(self) -> None:
+        if self._confirm(
+            "Restablecer ajustes",
+            "Volver a los valores por defecto.\n"
+            "Tus credenciales de API se conservarán.\n\n"
+            "¿Continuar?",
+        ) and self._on_reset_config:
+            self._on_reset_config()
+
+    # ── Theme ─────────────────────────────────────────────────────────────────
 
     def _select_theme(self, name: str) -> None:
         self._theme_var.set(name)
@@ -1498,17 +1658,31 @@ class SettingsPanel(ctk.CTkFrame):
             self._folder_var.set(folder)
 
     def _save(self) -> None:
+        try:
+            threads = max(1, min(int(self._threads_var.get()), 4))
+        except ValueError:
+            threads = 2
+
         cfg = {
-            "theme":             self._theme_var.get(),
-            "download_folder":   self._folder_var.get(),
-            "preferred_format":  self._fmt_var.get(),
-            "preferred_quality": self._qual_var.get(),
-            "folder_structure":  self._struct_var.get(),
+            "theme":                   self._theme_var.get(),
+            "download_folder":         self._folder_var.get(),
+            "preferred_format":        self._fmt_var.get(),
+            "preferred_quality":       self._qual_var.get(),
+            "folder_structure":        self._struct_var.get(),
+            "auto_fix_metadata":       self._auto_fix_var.get(),
+            "subfolder_per_platform":  self._subfolder_var.get(),
+            "threads":                 threads,
+            "notify_on_complete":      self._notify_var.get(),
+            "open_folder_on_complete": self._open_folder_var.get(),
+            "sound_on_complete":       self._sound_var.get(),
             "spotify":    {"client_id": self._sp_id_var.get(),
                            "client_secret": self._sp_secret_var.get()},
             "soundcloud": {"client_id": self._sc_id_var.get()},
         }
         self._ctrl.save_config(cfg)
+
+        # Apply runtime-reconfigurable settings immediately.
+        self._ctrl.update_thread_count(threads)
 
         sp_id, sp_secret = self._sp_id_var.get(), self._sp_secret_var.get()
         if sp_id and sp_secret:
@@ -1744,12 +1918,16 @@ class DjTracksDwCrackApp:
             self._content_area, self._ctrl, on_add_track=self._on_add_track)
         self._download_panel  = DownloadPanel(
             self._content_area, self._ctrl, self._history,
-            on_count_change=self._on_count_change)
+            on_count_change=self._on_count_change,
+            on_task_complete=self._on_task_complete)
         self._history_panel   = HistoryPanel(self._content_area, history=self._history)
         self._settings_panel  = SettingsPanel(
             self._content_area, self._ctrl,
-            on_save=self._on_settings_saved,
-            on_theme_change=self._on_theme_selected)
+            on_save              = self._on_settings_saved,
+            on_theme_change      = self._on_theme_selected,
+            on_clear_history     = self._on_clear_history,
+            on_clear_cover_cache = self._on_clear_cover_cache,
+            on_reset_config      = self._on_reset_config)
 
         self._panels = {
             "dashboard": self._dashboard_panel,
@@ -1808,6 +1986,53 @@ class DjTracksDwCrackApp:
         self._ctrl.add_to_queue(track)
         name = f"{track.artist_str} — {track.title}"
         self._toast(f"Añadido: {name[:60]}")
+
+    # ── Task completion side-effects (toggleable from Settings) ───────────────
+
+    def _on_task_complete(self, task: DownloadTask) -> None:
+        """Dispatch optional per-completion actions according to user prefs."""
+        if self._ctrl.get_config("notify_on_complete", True):
+            name = f"{task.track.artist_str} — {task.track.title}"
+            self._toast(f"✓ Listo: {name[:55]}", "success")
+
+        if self._ctrl.get_config("open_folder_on_complete", False) and task.output_path:
+            _open_in_file_manager(task.output_path.parent)
+
+        if self._ctrl.get_config("sound_on_complete", False):
+            try:
+                import winsound
+                winsound.MessageBeep(winsound.MB_OK)
+            except Exception:
+                # Non-Windows or sound system unavailable — silently ignore.
+                pass
+
+    # ── Maintenance handlers (wired from SettingsPanel) ───────────────────────
+
+    def _on_clear_history(self) -> None:
+        self._history.clear()
+        self._dashboard_panel.refresh()
+        self._history_panel.refresh()
+        self._toast("Historial borrado", "success")
+
+    def _on_clear_cover_cache(self) -> None:
+        _COVER_CACHE.clear()
+        self._toast("Caché de portadas vaciada", "success")
+
+    def _on_reset_config(self) -> None:
+        self._ctrl.reset_config()
+        # Rebuild settings panel so the inputs reflect the reset state.
+        self._settings_panel.destroy()
+        self._settings_panel = SettingsPanel(
+            self._content_area, self._ctrl,
+            on_save              = self._on_settings_saved,
+            on_theme_change      = self._on_theme_selected,
+            on_clear_history     = self._on_clear_history,
+            on_clear_cover_cache = self._on_clear_cover_cache,
+            on_reset_config      = self._on_reset_config)
+        self._panels["settings"] = self._settings_panel
+        self._show_panel("settings")
+        self.refresh_status()
+        self._toast("Ajustes restablecidos", "success")
 
     def _on_settings_saved(self) -> None:
         self._toast("Configuración guardada.", "success")

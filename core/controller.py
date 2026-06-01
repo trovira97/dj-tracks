@@ -155,6 +155,13 @@ class AppController:
 
     # ── Download queue ─────────────────────────────────────────────────────────
 
+    # Pretty platform names used when "subfolder_per_platform" is enabled.
+    _PLATFORM_SUBDIR = {
+        "spotify":    "Spotify",
+        "applemusic": "Apple Music",
+        "soundcloud": "SoundCloud",
+    }
+
     def add_to_queue(self, track: TrackInfo) -> DownloadTask:
         """
         Enqueue *track* for download using the current quality settings.
@@ -169,6 +176,12 @@ class AppController:
         structure = self._config.get(
             "folder_structure", "{artist}/{album}/{artist} - {title}"
         )
+
+        # Optional: prepend a platform sub-folder so Spotify / Apple Music /
+        # SoundCloud downloads stay neatly separated.
+        if self._config.get("subfolder_per_platform", False):
+            plat_dir  = self._PLATFORM_SUBDIR.get(track.platform, "Other")
+            structure = f"{plat_dir}/{structure}"
 
         if not Path(out_dir).is_absolute():
             out_dir = str(Path(__file__).parent.parent / out_dir)
@@ -322,3 +335,41 @@ class AppController:
         self.search_manager.update_provider(Platform.SOUNDCLOUD, provider)
         self.save_config({"soundcloud": {"client_id": client_id}})
         log.info("[Controller] Client ID SoundCloud actualizado")
+
+    # ── Live reconfiguration ──────────────────────────────────────────────────
+
+    def update_thread_count(self, n: int) -> None:
+        """
+        Resize the download worker pool at runtime.
+
+        Pending tasks already in the old pool are allowed to finish; new
+        submissions go to the new pool.  Capped at :data:`_MAX_WORKERS`.
+        """
+        n = max(1, min(int(n), _MAX_WORKERS))
+        old = self._executor
+        self._executor = ThreadPoolExecutor(
+            max_workers=n,
+            thread_name_prefix="dj-dl",
+        )
+        try:
+            old.shutdown(wait=False)
+        except Exception:
+            pass
+        log.info(f"[Controller] Hilos de descarga: {n}")
+
+    def reset_config(self) -> None:
+        """Reset configuration to defaults.  Credentials and queue are kept."""
+        # Preserve credentials so the user doesn't have to re-enter them.
+        keep = {
+            "spotify":    self._config.get("spotify",    {}),
+            "soundcloud": self._config.get("soundcloud", {}),
+            "apple_music": self._config.get("apple_music", {}),
+        }
+        self._config = dict(keep)
+        try:
+            self.CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.CONFIG_PATH, "w", encoding="utf-8") as fh:
+                json.dump(self._config, fh, indent=4, ensure_ascii=False)
+            log.info("[Controller] Configuración restablecida a valores por defecto")
+        except Exception as exc:
+            log.error(f"[Controller] Error al restablecer config: {exc}")
