@@ -22,3 +22,7 @@ requests>=2.31.0
 # ── Utilities ─────────────────────────────────────────────────────────────────
 python-slugify>=8.0.0
 platformdirs>=4.0.0
+
+# ── Optional UX features (gracefully degraded if missing) ─────────────────────
+tkinterdnd2>=0.4.0       # drag-and-drop URLs onto the search bar
+qrcode[pil]>=7.4.0       # QR codes in the donation dialog

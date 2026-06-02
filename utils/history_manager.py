@@ -116,14 +116,13 @@ class HistoryManager:
             self._records = []
 
     def _save_snapshot(self, records: List[DownloadRecord]) -> None:
-        """Persist *records* to disk.  Called outside the lock."""
+        """Persist *records* atomically.  Called outside the lock."""
+        from utils.atomic_io import atomic_write_json
         try:
-            HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-            with open(HISTORY_PATH, "w", encoding="utf-8") as fh:
-                json.dump(
-                    {"downloads": [r.to_dict() for r in records]},
-                    fh, indent=2, ensure_ascii=False,
-                )
+            atomic_write_json(
+                HISTORY_PATH,
+                {"downloads": [r.to_dict() for r in records]},
+            )
         except PermissionError as exc:
             log.error(f"[History] Sin permisos para escribir en {HISTORY_PATH}: {exc}")
         except OSError as exc:

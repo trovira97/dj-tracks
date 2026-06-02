@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import shutil
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -121,6 +122,22 @@ class AudioDownloader:
         self._ffmpeg_path  = ffmpeg_path or self._find_ffmpeg()
         self._cancel_flags: Dict[str, bool] = {}
         self._flags_lock   = threading.Lock()
+        # Global pause flag — when set, progress hooks block until cleared.
+        self._paused = threading.Event()
+
+    # ── Pause / resume ────────────────────────────────────────────────────────
+
+    def pause(self) -> None:
+        """Pause every active download at the next progress callback."""
+        self._paused.set()
+
+    def resume(self) -> None:
+        """Resume previously paused downloads."""
+        self._paused.clear()
+
+    @property
+    def is_paused(self) -> bool:
+        return self._paused.is_set()
 
     # ── FFmpeg detection ──────────────────────────────────────────────────────
 
@@ -162,11 +179,21 @@ class AudioDownloader:
         return f"{track.artist_str} {track.title} official audio"
 
     def _progress_hook(self, task: DownloadTask, d: dict) -> None:
-        """yt-dlp progress hook — checks cancellation and maps progress to 0–100."""
+        """yt-dlp progress hook — checks cancellation, honours pause,
+        and maps raw byte counts to a 0–100 progress percentage."""
         # Cancellation check: raises to abort the active yt-dlp download.
         with self._flags_lock:
             if self._cancel_flags.get(task.task_id):
                 raise _DownloadCancelled()
+
+        # Pause check: block this thread while the global pause flag is set.
+        # We re-check cancellation each iteration so the user can still
+        # cancel a paused task.
+        while self._paused.is_set():
+            with self._flags_lock:
+                if self._cancel_flags.get(task.task_id):
+                    raise _DownloadCancelled()
+            time.sleep(0.2)
 
         status = d.get("status")
         if status == "downloading":
@@ -259,43 +286,67 @@ class AudioDownloader:
         self._notify(task, 5, "Iniciando descarga…")
         log.info(f"[Downloader] Iniciando: {track.artist_str} — {track.title}")
 
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([download_url])
+        # Try the primary attempt; on failure, try a relaxed last-resort that
+        # drops the strict format selector and accepts whatever stream the
+        # source has.  Many "No video formats found" / format mismatch errors
+        # disappear with the loose selector.
+        attempts = [
+            ("primary",      ydl_opts),
+            ("last-resort",  {**ydl_opts,
+                               "format":      "bestaudio/best/worstaudio",
+                               "format_sort": []}),
+        ]
 
-            # Locate the output file by stem (yt-dlp may change the extension).
-            parent = out_path.parent
-            stem   = out_path.stem
-            for candidate in parent.glob(f"{stem}.*"):
-                if candidate.suffix.lower() in self._AUDIO_SUFFIXES:
-                    task.output_path = candidate
-                    break
+        last_exc: Optional[Exception] = None
 
-            task.status   = DownloadStatus.DONE
-            task.progress = 100.0
-            self._notify(task, 100, "Completado")
-            log.info(f"[Downloader] Completado: {task.output_path}")
-            return True
+        for label, opts in attempts:
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    ydl.download([download_url])
 
-        except _DownloadCancelled:
-            task.status    = DownloadStatus.CANCELLED
-            task.error_msg = ""
-            task.progress  = 0.0
-            self._notify(task, 0, "Cancelado")
-            log.info(f"[Downloader] Cancelado por el usuario: {track.artist_str} — {track.title}")
-            return False
+                # Locate the output file by stem (yt-dlp may change the extension).
+                parent = out_path.parent
+                stem   = out_path.stem
+                for candidate in parent.glob(f"{stem}.*"):
+                    if candidate.suffix.lower() in self._AUDIO_SUFFIXES:
+                        task.output_path = candidate
+                        break
 
-        except Exception as exc:
-            task.status    = DownloadStatus.ERROR
-            task.error_msg = self._humanise_error(str(exc))
-            self._notify(task, 0, f"Error: {task.error_msg}")
-            log.error(f"[Downloader] Error: {exc}")
-            return False
+                task.status   = DownloadStatus.DONE
+                task.progress = 100.0
+                self._notify(task, 100, "Completado")
+                if label == "last-resort":
+                    log.info(f"[Downloader] Completado (last-resort) : {task.output_path}")
+                else:
+                    log.info(f"[Downloader] Completado: {task.output_path}")
+                with self._flags_lock:
+                    self._cancel_flags.pop(task.task_id, None)
+                return True
 
-        finally:
-            # Clean up the flag entry.
-            with self._flags_lock:
-                self._cancel_flags.pop(task.task_id, None)
+            except _DownloadCancelled:
+                task.status    = DownloadStatus.CANCELLED
+                task.error_msg = ""
+                task.progress  = 0.0
+                self._notify(task, 0, "Cancelado")
+                log.info(f"[Downloader] Cancelado por el usuario: {track.artist_str} — {track.title}")
+                with self._flags_lock:
+                    self._cancel_flags.pop(task.task_id, None)
+                return False
+
+            except Exception as exc:
+                last_exc = exc
+                log.warning(f"[Downloader] Intento {label} falló: {exc}")
+                # Carry on to the next attempt unless we ran out.
+                continue
+
+        # All attempts exhausted.
+        task.status    = DownloadStatus.ERROR
+        task.error_msg = self._humanise_error(str(last_exc) if last_exc else "Error desconocido")
+        self._notify(task, 0, f"Error: {task.error_msg}")
+        log.error(f"[Downloader] Error definitivo tras reintentos: {last_exc}")
+        with self._flags_lock:
+            self._cancel_flags.pop(task.task_id, None)
+        return False
 
     def cancel(self, task_id: str) -> None:
         """

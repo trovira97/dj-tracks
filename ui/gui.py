@@ -972,6 +972,21 @@ class SearchPanel(ctk.CTkFrame):
     def focus_search(self) -> None:
         self._entry.focus()
 
+    def setup_drag_drop(self, root) -> bool:
+        """Wire up drag-and-drop: dropping a URL triggers a search."""
+        from utils.dnd import setup_text_drop
+
+        def _on_drop(text: str) -> None:
+            # tkinterdnd2 returns the drop wrapped in {} when it contains
+            # spaces; clean it up first.
+            url = text.strip().strip("{}").strip()
+            if not url:
+                return
+            self._search_var.set(url)
+            self._do_search()
+
+        return setup_text_drop(root, self._entry, _on_drop)
+
     def _set_platform(self, plat: str) -> None:
         self._platform_var.set(plat)
         for p, btn in self._chip_btns.items():
@@ -1187,6 +1202,14 @@ class DownloadPanel(ctk.CTkFrame):
                       text_color=C["text_mid"], corner_radius=5,
                       command=self._clear_done).pack(side="right")
 
+        # Pause / Resume toggle — affects every active download.
+        self._paused = False
+        self._pause_btn = ctk.CTkButton(
+            hdr, text="⏸  Pausar", width=110, height=26, font=_font(9, "bold"),
+            fg_color=C["warning"], hover_color=C["warning"],
+            text_color="#000", corner_radius=5, command=self._toggle_pause)
+        self._pause_btn.pack(side="right", padx=(0, 8))
+
         Divider(self).pack(fill="x", padx=20, pady=(10, 0))
 
         self._empty_lbl = ctk.CTkLabel(
@@ -1249,6 +1272,16 @@ class DownloadPanel(ctk.CTkFrame):
             self._list_visible = False
             self._empty_lbl.pack(expand=True)
         self._refresh_counter()
+
+    def _toggle_pause(self) -> None:
+        """Pause / resume every active download."""
+        self._paused = not self._paused
+        if self._paused:
+            self._ctrl.downloader.pause()
+            self._pause_btn.configure(text="▶  Reanudar", fg_color=C["success"], text_color="#000")
+        else:
+            self._ctrl.downloader.resume()
+            self._pause_btn.configure(text="⏸  Pausar", fg_color=C["warning"], text_color="#000")
 
     def _clear_done(self) -> None:
         self._ctrl.clear_completed()
@@ -1589,13 +1622,17 @@ class SettingsPanel(ctk.CTkFrame):
         SectionLabel(scroll, "Notificaciones").pack(anchor="w", pady=(16, 8))
         notif_card = self._card(scroll)
 
-        self._notify_var       = ctk.BooleanVar(value=self._ctrl.get_config("notify_on_complete", True))
-        self._open_folder_var  = ctk.BooleanVar(value=self._ctrl.get_config("open_folder_on_complete", False))
-        self._sound_var        = ctk.BooleanVar(value=self._ctrl.get_config("sound_on_complete", False))
+        self._notify_var        = ctk.BooleanVar(value=self._ctrl.get_config("notify_on_complete", True))
+        self._native_notify_var = ctk.BooleanVar(value=self._ctrl.get_config("native_notify_on_complete", False))
+        self._open_folder_var   = ctk.BooleanVar(value=self._ctrl.get_config("open_folder_on_complete", False))
+        self._sound_var         = ctk.BooleanVar(value=self._ctrl.get_config("sound_on_complete", False))
 
         self._switch_row(notif_card, "Mostrar aviso al completar",
-                         "Burbuja flotante cuando cada descarga termina",
+                         "Burbuja flotante dentro de la aplicación",
                          self._notify_var)
+        self._switch_row(notif_card, "Notificación del sistema",
+                         "Notificación nativa de Windows / macOS / Linux (visible aunque minimices)",
+                         self._native_notify_var)
         self._switch_row(notif_card, "Abrir carpeta al completar",
                          "Lanza el Explorador en la carpeta del archivo",
                          self._open_folder_var)
@@ -1636,6 +1673,12 @@ class SettingsPanel(ctk.CTkFrame):
         cache_n = _COVER_CACHE.size()
         self._maint_button(
             maint_card,
+            label=f"Crear acceso directo en el escritorio",
+            hint="Acceso rápido a DJ Tracks en tu escritorio (Win/Mac/Linux)",
+            command=self._handle_create_shortcut)
+        Divider(maint_card).pack(fill="x", padx=14, pady=2)
+        self._maint_button(
+            maint_card,
             label=f"Limpiar caché de imágenes",
             hint=f"Libera la memoria usada por las {cache_n} portadas en caché",
             command=self._handle_clear_cache)
@@ -1651,6 +1694,15 @@ class SettingsPanel(ctk.CTkFrame):
                            hint="Vuelve a los valores por defecto (las credenciales se conservan)",
                            command=self._handle_reset_config,
                            danger=True)
+
+        # ── Apoyar el proyecto ────────────────────────────────────────────────
+        SectionLabel(scroll, "Apoya el proyecto").pack(anchor="w", pady=(16, 8))
+        donate_card = self._card(scroll)
+        self._maint_button(
+            donate_card,
+            label="♥  Donar criptomoneda",
+            hint="Apoya el desarrollo con cualquier moneda — abre un diálogo con las direcciones",
+            command=self._handle_donate)
 
         # ── Save button ───────────────────────────────────────────────────────
         self._save_btn = ctk.CTkButton(
@@ -1713,6 +1765,27 @@ class SettingsPanel(ctk.CTkFrame):
         if self._on_clear_cover_cache:
             self._on_clear_cover_cache()
 
+    def _handle_donate(self) -> None:
+        from ui.donations import show_donations
+        show_donations(self.winfo_toplevel(), C)
+
+    def _handle_create_shortcut(self) -> None:
+        from tkinter import messagebox
+        try:
+            from utils.shortcut import create_shortcut
+            path = create_shortcut()
+            messagebox.showinfo(
+                "Acceso directo creado",
+                f"Acceso directo creado en:\n{path}",
+                parent=self.winfo_toplevel(),
+            )
+        except Exception as exc:
+            messagebox.showerror(
+                "Error",
+                f"No se pudo crear el acceso directo:\n{exc}",
+                parent=self.winfo_toplevel(),
+            )
+
     def _handle_clear_history(self) -> None:
         if self._confirm(
             "Borrar historial",
@@ -1770,9 +1843,10 @@ class SettingsPanel(ctk.CTkFrame):
             "auto_fix_metadata":       self._auto_fix_var.get(),
             "subfolder_per_platform":  self._subfolder_var.get(),
             "threads":                 threads,
-            "notify_on_complete":      self._notify_var.get(),
-            "open_folder_on_complete": self._open_folder_var.get(),
-            "sound_on_complete":       self._sound_var.get(),
+            "notify_on_complete":        self._notify_var.get(),
+            "native_notify_on_complete": self._native_notify_var.get(),
+            "open_folder_on_complete":   self._open_folder_var.get(),
+            "sound_on_complete":         self._sound_var.get(),
             "spotify":    {"client_id": self._sp_id_var.get(),
                            "client_secret": self._sp_secret_var.get()},
             "soundcloud": {"client_id": self._sc_id_var.get()},
@@ -1929,9 +2003,25 @@ class DjTracksDwCrackApp:
 
         self._root = ctk.CTk()
         self._root.title(self.APP_TITLE)
-        self._root.geometry(self.APP_GEOMETRY)
         self._root.minsize(*self.APP_MIN_SIZE)
         self._root.configure(fg_color=C["bg"])
+
+        # Restore window geometry from last session (size + position) when
+        # available; otherwise use the default centred geometry.
+        saved_geom  = controller.get_config("window_geometry", "")
+        saved_state = controller.get_config("window_state",    "normal")
+        if saved_geom and isinstance(saved_geom, str) and "x" in saved_geom:
+            try:
+                self._root.geometry(saved_geom)
+            except Exception:
+                self._root.geometry(self.APP_GEOMETRY)
+        else:
+            self._root.geometry(self.APP_GEOMETRY)
+        if saved_state == "zoomed":
+            try:
+                self._root.state("zoomed")
+            except Exception:
+                pass
 
         self._panels: Dict[str, ctk.CTkFrame] = {}
         self._content_area: Optional[ctk.CTkFrame] = None
@@ -1941,6 +2031,9 @@ class DjTracksDwCrackApp:
 
         # Register the UI callback via the public setter.
         self._ctrl.set_on_task_update(self._download_panel.on_task_update)
+
+        # Drag-and-drop: dropping a URL on the search bar triggers a search.
+        self._search_panel.setup_drag_drop(self._root)
 
         # Resume any tasks that were pending when the app last closed.
         restored = self._ctrl.resume_restored_queue()
@@ -1982,6 +2075,12 @@ class DjTracksDwCrackApp:
             self._topbar, text="DASHBOARD",
             font=_font(11, "bold"), text_color=C["text_mid"])
         self._topbar_title.pack(side="left", padx=22)
+
+        ctk.CTkButton(
+            self._topbar, text="♥", width=32, height=28, font=_font(13, "bold"),
+            fg_color="transparent", hover_color=C["surface"],
+            text_color=C["error"], corner_radius=6,
+            command=self._open_donations).pack(side="right", padx=(0, 12))
 
         ctk.CTkLabel(self._topbar,
                      text="Ctrl+F  Buscar   Ctrl+D  Descargas   Ctrl+H  Historial",
@@ -2091,9 +2190,15 @@ class DjTracksDwCrackApp:
 
     def _on_task_complete(self, task: DownloadTask) -> None:
         """Dispatch optional per-completion actions according to user prefs."""
+        name = f"{task.track.artist_str} — {task.track.title}"
+
         if self._ctrl.get_config("notify_on_complete", True):
-            name = f"{task.track.artist_str} — {task.track.title}"
             self._toast(f"✓ Listo: {name[:55]}", "success")
+
+        # Native OS notification (persists when window is minimised / hidden).
+        if self._ctrl.get_config("native_notify_on_complete", False):
+            from utils.notifications import notify
+            notify("DJ Tracks — Descarga completa", name[:140])
 
         if self._ctrl.get_config("open_folder_on_complete", False) and task.output_path:
             _open_in_file_manager(task.output_path.parent)
@@ -2186,7 +2291,23 @@ class DjTracksDwCrackApp:
     def _toast(self, message: str, kind: str = "info") -> None:
         Toast(self._root, message, kind=kind)
 
+    def _open_donations(self) -> None:
+        from ui.donations import show_donations
+        show_donations(self._root, C)
+
+    def _save_geometry(self) -> None:
+        """Persist window size, position, and maximised state."""
+        try:
+            state = self._root.state()
+            payload = {"window_state": state}
+            if state == "normal":
+                payload["window_geometry"] = self._root.geometry()
+            self._ctrl.save_config(payload)
+        except Exception:
+            pass
+
     def _quit(self) -> None:
+        self._save_geometry()
         self._ctrl.shutdown()
         self._root.quit()
 

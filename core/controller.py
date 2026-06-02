@@ -109,12 +109,11 @@ class AppController:
             self._config = {}
 
     def save_config(self, updates: Dict) -> None:
-        """Merge *updates* into the current config and persist to disk."""
+        """Merge *updates* into the current config and persist atomically."""
         self._config.update(updates)
         try:
-            self.CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.CONFIG_PATH, "w", encoding="utf-8") as fh:
-                json.dump(self._config, fh, indent=4, ensure_ascii=False)
+            from utils.atomic_io import atomic_write_json
+            atomic_write_json(self.CONFIG_PATH, self._config, indent=4)
             log.info("[Controller] Configuración guardada")
         except Exception as exc:
             log.error(f"[Controller] Error al guardar config: {exc}")
@@ -371,9 +370,8 @@ class AppController:
         }
         self._config = dict(keep)
         try:
-            self.CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.CONFIG_PATH, "w", encoding="utf-8") as fh:
-                json.dump(self._config, fh, indent=4, ensure_ascii=False)
+            from utils.atomic_io import atomic_write_json
+            atomic_write_json(self.CONFIG_PATH, self._config, indent=4)
             log.info("[Controller] Configuración restablecida a valores por defecto")
         except Exception as exc:
             log.error(f"[Controller] Error al restablecer config: {exc}")

@@ -81,6 +81,8 @@ def _bootstrap() -> None:
         ("slugify",       "python-slugify"),
         ("requests",      "requests"),
         ("platformdirs",  "platformdirs"),
+        ("tkinterdnd2",   "tkinterdnd2"),   # optional drag-and-drop
+        ("qrcode",        "qrcode[pil]"),   # optional donation QR codes
     ]
 
     missing = [pkg for imp, pkg in core_deps if not _can_import(imp)]
@@ -108,17 +110,39 @@ def _bootstrap() -> None:
 
 def main() -> None:
     """Initialise the controller and start the GUI main loop."""
-    # When running from a PyInstaller bundle, all deps are already inside —
-    # skip the runtime pip bootstrap.
+    # ── 1) Windows-native polish (no-ops elsewhere) ──────────────────────────
+    # Must run BEFORE any module imports yt-dlp / asyncio / subprocess use.
+    from utils.win_native import install_all as _install_win_polish
+    _install_win_polish()
+
+    # ── 2) Bootstrap deps (only in source mode) ──────────────────────────────
     if not getattr(sys, "frozen", False):
         _bootstrap()
 
-    from core.controller import AppController
-    from ui.gui          import DjTracksDwCrackApp
+    # ── 3) Single-instance lock — refuse to launch a duplicate ───────────────
+    from utils.single_instance import acquire as _acquire_single, release as _release_single
+    if not _acquire_single():
+        try:
+            import tkinter as _tk
+            from tkinter import messagebox as _mb
+            _root = _tk.Tk()
+            _root.withdraw()
+            _mb.showinfo("DJ Tracks",
+                         "DJ Tracks ya se está ejecutando.\nRevisa la barra de tareas.")
+            _root.destroy()
+        except Exception:
+            print("DJ Tracks ya se está ejecutando.", file=sys.stderr)
+        return
 
-    controller = AppController()
-    app        = DjTracksDwCrackApp(controller)
-    app.run()
+    try:
+        from core.controller import AppController
+        from ui.gui          import DjTracksDwCrackApp
+
+        controller = AppController()
+        app        = DjTracksDwCrackApp(controller)
+        app.run()
+    finally:
+        _release_single()
 
 
 if __name__ == "__main__":

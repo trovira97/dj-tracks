@@ -91,12 +91,11 @@ def save_queue(tasks: List[DownloadTask]) -> int:
     """
     pending = [t for t in tasks if t.status not in _TERMINAL]
     try:
-        QUEUE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(QUEUE_PATH, "w", encoding="utf-8") as fh:
-            json.dump(
-                {"tasks": [_task_to_dict(t) for t in pending]},
-                fh, indent=2, ensure_ascii=False,
-            )
+        from utils.atomic_io import atomic_write_json
+        atomic_write_json(
+            QUEUE_PATH,
+            {"tasks": [_task_to_dict(t) for t in pending]},
+        )
         if pending:
             log.info(f"[QueuePersistence] Guardadas {len(pending)} tareas pendientes")
         return len(pending)
