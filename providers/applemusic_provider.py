@@ -35,19 +35,35 @@ class AppleMusicProvider(MusicProvider):
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _item_to_info(self, item: dict) -> TrackInfo:
-        artwork = item.get("artworkUrl100", "").replace("100x100", "600x600")
-        year    = (item.get("releaseDate") or "")[:4]
+        # iTunes returns artwork at 100x100; the URL pattern lets us request any
+        # resolution by string substitution.  3000x3000bb is the highest the
+        # CDN reliably serves (the trailing "bb" gives white-background fill).
+        artwork_100 = item.get("artworkUrl100", "")
+        artwork     = artwork_100.replace("100x100bb", "3000x3000bb") \
+                                 .replace("100x100",   "3000x3000bb")
+
+        release_date = item.get("releaseDate") or ""
+        year         = release_date[:4]
+
+        artist       = item.get("artistName", "Unknown") or "Unknown"
+        album_artist = item.get("collectionArtistName") or artist
+
         return TrackInfo(
-            title       = item.get("trackName") or item.get("collectionName", ""),
-            artists     = [item.get("artistName", "Unknown")],
-            album       = item.get("collectionName", ""),
-            year        = year,
-            genre       = item.get("primaryGenreName", ""),
-            duration_ms = item.get("trackTimeMillis", 0),
-            cover_url   = artwork,
-            source_url  = item.get("trackViewUrl") or item.get("collectionViewUrl", ""),
-            platform    = "applemusic",
-            track_id    = str(item.get("trackId") or item.get("collectionId", "")),
+            title        = item.get("trackName") or item.get("collectionName", ""),
+            artists      = [artist],
+            album        = item.get("collectionName", ""),
+            album_artist = album_artist,
+            year         = year,
+            release_date = release_date,
+            genre        = item.get("primaryGenreName", ""),
+            duration_ms  = item.get("trackTimeMillis", 0),
+            cover_url    = artwork,
+            source_url   = item.get("trackViewUrl") or item.get("collectionViewUrl", ""),
+            platform     = "applemusic",
+            track_id     = str(item.get("trackId") or item.get("collectionId", "")),
+            track_number = item.get("trackNumber", 0) or 0,
+            disc_number  = item.get("discNumber", 0) or 0,
+            total_tracks = item.get("trackCount", 0) or 0,
         )
 
     def _extract_apple_id(self, url: str) -> Optional[str]:

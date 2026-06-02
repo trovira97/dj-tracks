@@ -57,7 +57,8 @@ class SpotifyProvider(MusicProvider):
 
     def _track_to_info(self, t: dict) -> Optional[TrackInfo]:
         """
-        Convert a Spotify track dict to TrackInfo.
+        Convert a Spotify track dict to TrackInfo with full metadata.
+
         Returns None if the dict is falsy or missing required fields
         (happens with deleted/unavailable tracks in playlists).
         """
@@ -69,20 +70,31 @@ class SpotifyProvider(MusicProvider):
             artists = [a["name"] for a in t.get("artists", []) if a.get("name")]
             album   = t.get("album") or {}
             images  = album.get("images") or []
+            # Spotify returns images sorted largest-first (640x640 → 300x300 → 64x64).
             cover   = images[0]["url"] if images else ""
-            year    = (album.get("release_date") or "")[:4]
-            isrc    = (t.get("external_ids") or {}).get("isrc", "")
+            release_date = album.get("release_date") or ""
+            year         = release_date[:4]
+            isrc         = (t.get("external_ids") or {}).get("isrc", "")
+
+            album_artists = [a["name"] for a in (album.get("artists") or []) if a.get("name")]
+            album_artist  = ", ".join(album_artists) if album_artists else ""
+
             return TrackInfo(
-                title       = t.get("name", "") or "Unknown",
-                artists     = artists or ["Unknown"],
-                album       = album.get("name", ""),
-                year        = year,
-                isrc        = isrc,
-                cover_url   = cover,
-                duration_ms = t.get("duration_ms", 0),
-                source_url  = (t.get("external_urls") or {}).get("spotify", ""),
-                platform    = "spotify",
-                track_id    = t.get("id", ""),
+                title        = t.get("name", "") or "Unknown",
+                artists      = artists or ["Unknown"],
+                album        = album.get("name", ""),
+                album_artist = album_artist,
+                year         = year,
+                release_date = release_date,
+                isrc         = isrc,
+                cover_url    = cover,
+                duration_ms  = t.get("duration_ms", 0),
+                source_url   = (t.get("external_urls") or {}).get("spotify", ""),
+                platform     = "spotify",
+                track_id     = t.get("id", ""),
+                track_number = t.get("track_number", 0) or 0,
+                disc_number  = t.get("disc_number", 0) or 0,
+                total_tracks = album.get("total_tracks", 0) or 0,
             )
         except Exception as exc:
             log.warning(f"[Spotify] No se pudo convertir track: {exc}")
@@ -136,21 +148,29 @@ class SpotifyProvider(MusicProvider):
                     album   = self._sp.next(album["tracks"])
                     raw_tracks.extend(album.get("items", []))
 
+                total_tracks  = album.get("total_tracks", len(raw_tracks))
+                album_artists = [a["name"] for a in (album.get("artists") or []) if a.get("name")]
+                album_artist  = ", ".join(album_artists)
+
                 result = []
                 for t in raw_tracks[:_PLAYLIST_LIMIT]:
                     if not t or not t.get("id"):
                         continue
                     artists = [a["name"] for a in t.get("artists", []) if a.get("name")]
                     result.append(TrackInfo(
-                        title       = t.get("name", "") or "Unknown",
-                        artists     = artists or ["Unknown"],
-                        album       = album_name,
-                        year        = year,
-                        cover_url   = cover,
-                        duration_ms = t.get("duration_ms", 0),
-                        source_url  = (t.get("external_urls") or {}).get("spotify", ""),
-                        platform    = "spotify",
-                        track_id    = t.get("id", ""),
+                        title        = t.get("name", "") or "Unknown",
+                        artists      = artists or ["Unknown"],
+                        album        = album_name,
+                        album_artist = album_artist,
+                        year         = year,
+                        cover_url    = cover,
+                        duration_ms  = t.get("duration_ms", 0),
+                        source_url   = (t.get("external_urls") or {}).get("spotify", ""),
+                        platform     = "spotify",
+                        track_id     = t.get("id", ""),
+                        track_number = t.get("track_number", 0) or 0,
+                        disc_number  = t.get("disc_number", 0) or 0,
+                        total_tracks = total_tracks,
                     ))
                 log.info(f"[Spotify] Album: {len(result)} pistas")
                 return result

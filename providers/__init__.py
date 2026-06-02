@@ -37,18 +37,23 @@ class TrackInfo:
         extra:       Arbitrary provider-specific extras.
     """
 
-    title:       str
-    artists:     List[str]
-    album:       str               = ""
-    year:        str               = ""
-    genre:       str               = ""
-    duration_ms: int               = 0
-    isrc:        str               = ""
-    cover_url:   str               = ""
-    source_url:  str               = ""
-    platform:    str               = ""
-    track_id:    str               = ""
-    extra:       Dict[str, Any]    = field(default_factory=dict)
+    title:        str
+    artists:      List[str]
+    album:        str               = ""
+    album_artist: str               = ""    # may differ from artists for compilations
+    year:         str               = ""    # 4-character year extracted from release_date
+    release_date: str               = ""    # full ISO-ish date when known (YYYY-MM-DD)
+    genre:        str               = ""
+    duration_ms:  int               = 0
+    isrc:         str               = ""
+    cover_url:    str               = ""
+    source_url:   str               = ""
+    platform:     str               = ""
+    track_id:     str               = ""
+    track_number: int               = 0     # 0 = unknown
+    disc_number:  int               = 0     # 0 = unknown
+    total_tracks: int               = 0     # 0 = unknown
+    extra:        Dict[str, Any]    = field(default_factory=dict)
 
     @property
     def artist_str(self) -> str:
