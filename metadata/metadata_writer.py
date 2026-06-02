@@ -15,7 +15,7 @@ import requests
 from mutagen.flac import FLAC, Picture
 from mutagen.id3 import (
     APIC, ID3, ID3NoHeaderError,
-    TALB, TDRC, TCON, TIT2, TPE1, TPE2, TSRC,
+    TALB, TDRC, TCON, TIT2, TPE1, TPE2, TPOS, TRCK, TSRC,
 )
 from mutagen.mp4 import MP4, MP4Cover
 from mutagen.oggvorbis import OggVorbis
@@ -24,8 +24,10 @@ from metadata.metadata_reader import AudioMetadata, read_metadata
 from providers import TrackInfo
 from utils.logger import log
 
-# Maximum cover image size to accept (10 MB).
-_MAX_COVER_BYTES = 10 * 1024 * 1024
+# Maximum cover image size to accept.  We bump this to 20 MB so high-resolution
+# Bandcamp / Apple Music covers (often 1500×1500 JPEGs in the 2–8 MB range)
+# fit without being silently dropped.  20 MB is still safe for ID3 / FLAC tags.
+_MAX_COVER_BYTES = 20 * 1024 * 1024
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -113,7 +115,8 @@ def write_metadata(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _write_mp3(path: Path, track: TrackInfo, cover: Optional[bytes]) -> bool:
-    """Write ID3v2.3 tags to an MP3 file."""
+    """Write ID3v2.3 tags to an MP3 file (title, artists, album, album artist,
+    date, genre, ISRC, track/disc numbers, cover)."""
     try:
         try:
             tags = ID3(str(path))
@@ -122,15 +125,24 @@ def _write_mp3(path: Path, track: TrackInfo, cover: Optional[bytes]) -> bool:
 
         tags.delall("TIT2"); tags.add(TIT2(text=[track.title]))
         tags.delall("TPE1"); tags.add(TPE1(text=[track.artist_str]))
-        tags.delall("TPE2"); tags.add(TPE2(text=[track.artist_str]))
+        tags.delall("TPE2"); tags.add(TPE2(text=[track.album_artist or track.artist_str]))
         tags.delall("TALB"); tags.add(TALB(text=[track.album or ""]))
 
-        if track.year:
-            tags.delall("TDRC"); tags.add(TDRC(text=[track.year]))
+        # Prefer full release date; fall back to year-only when that's all we have.
+        date_value = track.release_date or track.year
+        if date_value:
+            tags.delall("TDRC"); tags.add(TDRC(text=[date_value]))
         if track.genre:
             tags.delall("TCON"); tags.add(TCON(text=[track.genre]))
         if track.isrc:
             tags.delall("TSRC"); tags.add(TSRC(text=[track.isrc]))
+
+        # Track and disc numbers: "n/total" if we know the total, else just "n".
+        if track.track_number:
+            trck = f"{track.track_number}/{track.total_tracks}" if track.total_tracks else str(track.track_number)
+            tags.delall("TRCK"); tags.add(TRCK(text=[trck]))
+        if track.disc_number:
+            tags.delall("TPOS"); tags.add(TPOS(text=[str(track.disc_number)]))
 
         if cover:
             tags.delall("APIC")
@@ -150,15 +162,22 @@ def _write_flac(path: Path, track: TrackInfo, cover: Optional[bytes]) -> bool:
     """Write VorbisComment tags (and optional cover Picture) to a FLAC file."""
     try:
         audio = FLAC(str(path))
-        audio["title"]  = [track.title]
-        audio["artist"] = [track.artist_str]
-        audio["album"]  = [track.album or ""]
-        if track.year:
-            audio["date"] = [track.year]
+        audio["title"]        = [track.title]
+        audio["artist"]       = [track.artist_str]
+        audio["albumartist"]  = [track.album_artist or track.artist_str]
+        audio["album"]        = [track.album or ""]
+        if track.release_date or track.year:
+            audio["date"] = [track.release_date or track.year]
         if track.genre:
             audio["genre"] = [track.genre]
         if track.isrc:
             audio["isrc"] = [track.isrc]
+        if track.track_number:
+            audio["tracknumber"] = [str(track.track_number)]
+            if track.total_tracks:
+                audio["tracktotal"] = [str(track.total_tracks)]
+        if track.disc_number:
+            audio["discnumber"] = [str(track.disc_number)]
 
         if cover:
             audio.clear_pictures()
@@ -182,11 +201,16 @@ def _write_m4a(path: Path, track: TrackInfo, cover: Optional[bytes]) -> bool:
         audio = MP4(str(path))
         audio["\xa9nam"] = [track.title]
         audio["\xa9ART"] = [track.artist_str]
+        audio["aART"]    = [track.album_artist or track.artist_str]     # album artist
         audio["\xa9alb"] = [track.album or ""]
-        if track.year:
-            audio["\xa9day"] = [track.year]
+        if track.release_date or track.year:
+            audio["\xa9day"] = [track.release_date or track.year]
         if track.genre:
             audio["\xa9gen"] = [track.genre]
+        if track.track_number:
+            audio["trkn"] = [(track.track_number, track.total_tracks or 0)]
+        if track.disc_number:
+            audio["disk"] = [(track.disc_number, 0)]
         if cover:
             audio["covr"] = [MP4Cover(cover, imageformat=MP4Cover.FORMAT_JPEG)]
 
@@ -240,14 +264,20 @@ def verify_and_fix(path: Path, track: TrackInfo) -> Dict[str, Tuple[str, str]]:
 
     corrections: Dict[str, Tuple[str, str]] = {}
     checks = [
-        ("title",  current.title,      track.title),
-        ("artist", current.artist_str, track.artist_str),
-        ("album",  current.album,      track.album),
-        ("year",   current.year,       track.year),
+        ("title",        current.title,        track.title),
+        ("artist",       current.artist_str,   track.artist_str),
+        ("album",        current.album,        track.album),
+        ("album_artist", current.album_artist, track.album_artist or track.artist_str),
+        ("year",         current.year,         track.year),
     ]
     for field_name, current_val, expected_val in checks:
-        if _differs(current_val, expected_val):
+        # Only flag when we actually have an expected value to write.
+        if expected_val and _differs(current_val, expected_val):
             corrections[field_name] = (current_val, expected_val)
+
+    # Track number is numeric; check separately.
+    if track.track_number and current.track_n != track.track_number:
+        corrections["track_number"] = (str(current.track_n), str(track.track_number))
 
     if corrections:
         log.info(

@@ -5,6 +5,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Audio quality and metadata pass
+- **TrackInfo** carries full album-aware metadata: `album_artist`,
+  `release_date` (full ISO), `track_number`, `disc_number`, `total_tracks`.
+- **AudioMetadata** (reader) reads `album_artist` and `disc_n` too.
+- **MP3 writer** now writes TRCK ("n/total"), TPOS, TPE2 (album artist),
+  and uses the full release_date in TDRC.
+- **FLAC writer** writes `albumartist`, `tracknumber`, `tracktotal`,
+  `discnumber`.
+- **M4A writer** writes `aART` (album artist), `trkn` ((n, total)), `disk`.
+- **verify_and_fix** also checks `album_artist` and `track_number`.
+
+### Changed — Maximum audio quality everywhere
+- **yt-dlp `format_sort`** added: `["acodec:flac", "acodec:wav",
+  "acodec:alac", "acodec:opus", "abr", "asr"]` — always selects the best
+  available stream by codec then bitrate then sample rate.
+- **YouTube fallback** now uses `ytmusicsearch1:` instead of `ytsearch1:`.
+  YT Music streams are higher quality (opus 160 kbps vs YT's typical
+  opus 128 / m4a 128) and search results are biased to official audio.
+- **Default quality profile** is now "Máxima calidad (original)" — no
+  re-encoding, keeps the source codec/bitrate intact (FLAC from Bandcamp,
+  opus from YT Music, etc.).
+- **Spotify cover** still 640×640 (max API serves) — full release_date
+  + track/disc number + album artist now extracted.
+- **Apple Music cover** bumped from 600×600 to **3000×3000bb** (max).
+- **SoundCloud cover** bumped from `-t500x500` to `-original`
+  (artist's source upload, no downscale).
+- **Bandcamp cover** bumped from `_10` (350×350) to `_0` (typically
+  1500×1500 original).
+- **Cover size limit** raised from 10 MB → 20 MB so high-res Apple /
+  Bandcamp artwork fits without being dropped.
+
 ### Added
 - **Bandcamp provider**: search, URL resolution, and direct download
   (bypasses YouTube fallback). Uses the public `bcsearch_public_api`

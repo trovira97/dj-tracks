@@ -102,7 +102,11 @@ class SoundCloudProvider(MusicProvider):
         if not isinstance(t, dict) or not t:
             return None
         try:
-            artwork = (t.get("artwork_url") or "").replace("-large", "-t500x500")
+            # Request the original (uncropped) artwork instead of the 500×500
+            # downscale.  The SC CDN serves whatever suffix you provide; -original
+            # returns the source upload at its native resolution.
+            artwork = (t.get("artwork_url") or "").replace("-large", "-original")
+
             user    = t.get("user") or {}
             artist  = (user.get("username") if isinstance(user, dict) else None) or "Unknown"
             title   = t.get("title") or "Unknown"
@@ -115,15 +119,21 @@ class SoundCloudProvider(MusicProvider):
                     artists = [a_part.strip()]
                     title   = t_part.strip()
 
+            release_date = t.get("release_date") or t.get("created_at", "")[:10]
+            year         = release_date[:4] if release_date else ""
+
             return TrackInfo(
-                title       = title,
-                artists     = artists,
-                genre       = t.get("genre") or "",
-                duration_ms = t.get("duration") or 0,
-                cover_url   = artwork,
-                source_url  = t.get("permalink_url") or "",
-                platform    = "soundcloud",
-                track_id    = str(t.get("id") or ""),
+                title        = title,
+                artists      = artists,
+                album        = "",
+                year         = year,
+                release_date = release_date,
+                genre        = t.get("genre") or "",
+                duration_ms  = t.get("duration") or 0,
+                cover_url    = artwork,
+                source_url   = t.get("permalink_url") or "",
+                platform     = "soundcloud",
+                track_id     = str(t.get("id") or ""),
             )
         except Exception as exc:
             log.warning(f"[SoundCloud] No se pudo convertir track: {exc}")

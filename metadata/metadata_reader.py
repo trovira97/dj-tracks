@@ -18,16 +18,18 @@ from utils.logger import log
 class AudioMetadata:
     """Metadata read from an audio file."""
 
-    title:    str        = ""
-    artists:  List[str]  = field(default_factory=list)
-    album:    str        = ""
-    year:     str        = ""
-    genre:    str        = ""
-    isrc:     str        = ""
-    track_n:  int        = 0
-    cover:    bytes      = field(default_factory=bytes)
-    bitrate:  int        = 0    # kbps
-    duration: float      = 0.0  # seconds
+    title:        str        = ""
+    artists:      List[str]  = field(default_factory=list)
+    album:        str        = ""
+    album_artist: str        = ""
+    year:         str        = ""
+    genre:        str        = ""
+    isrc:         str        = ""
+    track_n:      int        = 0
+    disc_n:       int        = 0
+    cover:        bytes      = field(default_factory=bytes)
+    bitrate:      int        = 0    # kbps
+    duration:     float      = 0.0  # seconds
 
     @property
     def artist_str(self) -> str:
@@ -59,16 +61,23 @@ def read_metadata(path: Path) -> Optional[AudioMetadata]:
         artists_raw = audio.get("artist", audio.get("artists", ["Unknown"]))
         meta.artists = [a.strip() for a in artists_raw if a.strip()]
 
-        meta.album = (audio.get("album", [""])[0] or "").strip()
-        meta.year  = ((audio.get("date", audio.get("year", [""]))[0]) or "")[:4]
-        meta.genre = (audio.get("genre",  [""])[0] or "").strip()
-        meta.isrc  = (audio.get("isrc",   [""])[0] or "").strip()
+        meta.album        = (audio.get("album", [""])[0] or "").strip()
+        meta.album_artist = (audio.get("albumartist", [""])[0] or "").strip()
+        meta.year         = ((audio.get("date", audio.get("year", [""]))[0]) or "")[:4]
+        meta.genre        = (audio.get("genre", [""])[0] or "").strip()
+        meta.isrc         = (audio.get("isrc",  [""])[0] or "").strip()
 
         tn = audio.get("tracknumber", ["0"])[0] or "0"
         try:
             meta.track_n = int(tn.split("/")[0])
         except (ValueError, IndexError):
             meta.track_n = 0
+
+        dn = audio.get("discnumber", ["0"])[0] or "0"
+        try:
+            meta.disc_n = int(dn.split("/")[0])
+        except (ValueError, IndexError):
+            meta.disc_n = 0
 
         if hasattr(audio, "info"):
             if hasattr(audio.info, "length"):

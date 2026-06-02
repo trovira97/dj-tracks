@@ -28,6 +28,16 @@ class TestGetProfile:
         assert get_profile("xyz", "yyy") is DEFAULT_PROFILE
         assert get_profile("mp3", "999k") is DEFAULT_PROFILE
 
+    def test_mp3_with_best_quality_returns_320(self):
+        """User picks MP3 but with "best" quality → should use 320 (max MP3)."""
+        p = get_profile("mp3", "best")
+        assert p.format == AudioFormat.MP3
+        assert p.quality == AudioQuality.Q320
+
+    def test_default_is_best(self):
+        """The default profile prefers original quality (no re-encoding)."""
+        assert DEFAULT_PROFILE.format == AudioFormat.BEST
+
 
 class TestPostprocessors:
     def test_mp3_returns_extract_audio(self):

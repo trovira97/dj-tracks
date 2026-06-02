@@ -87,13 +87,16 @@ class QualityProfile:
 PROFILES: Dict[str, QualityProfile] = {
     "mp3_128":  QualityProfile(AudioFormat.MP3,  AudioQuality.Q128,  "MP3  128 kbps"),
     "mp3_192":  QualityProfile(AudioFormat.MP3,  AudioQuality.Q192,  "MP3  192 kbps"),
-    "mp3_320":  QualityProfile(AudioFormat.MP3,  AudioQuality.Q320,  "MP3  320 kbps ⭐"),
+    "mp3_320":  QualityProfile(AudioFormat.MP3,  AudioQuality.Q320,  "MP3  320 kbps"),
     "flac":     QualityProfile(AudioFormat.FLAC, AudioQuality.BEST,  "FLAC  Lossless"),
     "wav":      QualityProfile(AudioFormat.WAV,  AudioQuality.BEST,  "WAV   Lossless"),
-    "best":     QualityProfile(AudioFormat.BEST, AudioQuality.BEST,  "Mejor disponible"),
+    "best":     QualityProfile(AudioFormat.BEST, AudioQuality.BEST,  "Máxima calidad (original) ⭐"),
 }
 
-DEFAULT_PROFILE: QualityProfile = PROFILES["mp3_320"]
+# Default to "best" so users get the original codec/bitrate from the source
+# (FLAC from Bandcamp, opus-160 from YouTube Music, etc.) — no quality loss
+# from a needless re-encode.
+DEFAULT_PROFILE: QualityProfile = PROFILES["best"]
 
 
 def get_profile(fmt: str, quality: str) -> QualityProfile:
@@ -108,13 +111,18 @@ def get_profile(fmt: str, quality: str) -> QualityProfile:
         get_profile("flac", "best") # → PROFILES["flac"]
         get_profile("wav", "anything") # → PROFILES["wav"]
     """
-    fmt_lower = fmt.lower()
+    fmt_lower = (fmt or "").lower()
 
     # Lossless / best formats ignore the quality token.
     if fmt_lower in ("flac", "wav", "best"):
         return PROFILES.get(fmt_lower, DEFAULT_PROFILE)
 
+    # "best" or unrecognised quality on MP3 → use 320 (highest MP3).
+    quality_lower = (quality or "").lower()
+    if fmt_lower == "mp3" and quality_lower in ("best", ""):
+        return PROFILES["mp3_320"]
+
     # MP3: build a key like "mp3_320" from "320k".
-    bitrate = quality.lower().rstrip("k")
+    bitrate = quality_lower.rstrip("k")
     key = f"{fmt_lower}_{bitrate}"
     return PROFILES.get(key, DEFAULT_PROFILE)

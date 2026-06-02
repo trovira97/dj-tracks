@@ -154,6 +154,11 @@ class AudioDownloader:
     # ── Core download ─────────────────────────────────────────────────────────
 
     def _build_yt_query(self, track: TrackInfo) -> str:
+        """Build a YouTube Music search query optimised for audio quality.
+
+        Adding "official audio" steers results to the cleanest source upload
+        (no fan videos, no live versions, no lyrics karaoke).
+        """
         return f"{track.artist_str} {track.title} official audio"
 
     def _progress_hook(self, task: DownloadTask, d: dict) -> None:
@@ -205,7 +210,7 @@ class AudioDownloader:
 
         # Platforms whose source_url can be handed straight to yt-dlp
         # (no YouTube fallback needed because yt-dlp downloads from them
-        # natively).
+        # natively, often at higher quality than YT).
         direct_url_platforms = {
             Platform.SOUNDCLOUD.value,
             Platform.BANDCAMP.value,
@@ -213,7 +218,9 @@ class AudioDownloader:
         if track.platform in direct_url_platforms and track.source_url:
             download_url = track.source_url
         else:
-            download_url = f"ytsearch1:{self._build_yt_query(track)}"
+            # YouTube Music search yields better audio streams (opus 160 kbps)
+            # than plain YouTube search (often opus 128 / m4a 128).
+            download_url = f"ytmusicsearch1:{self._build_yt_query(track)}"
 
         out_path = build_output_path(
             base_folder = task.output_dir,
@@ -228,6 +235,12 @@ class AudioDownloader:
 
         ydl_opts: dict = {
             "format":         profile.yt_dlp_format_str(),
+            # Always pick the highest-quality audio stream available, preferring
+            # lossless codecs, then highest bitrate, then highest sample rate.
+            # This is what makes Bandcamp FLAC win over Bandcamp MP3, and YT
+            # opus-160 win over m4a-128 on the same video.
+            "format_sort":    ["acodec:flac", "acodec:wav", "acodec:alac",
+                                "acodec:opus", "abr", "asr"],
             "outtmpl":        outtmpl,
             "noplaylist":     True,
             "quiet":          True,

@@ -32,6 +32,28 @@ class TestTrackInfo:
         # Extras must not leak between instances.
         assert t2.extra == {}, f"Mutable default leaked: {t2.extra}"
 
+    def test_new_metadata_fields_default_safely(self):
+        """New fields added in v2.2 must default to safe falsy values."""
+        t = TrackInfo("T", ["A"])
+        assert t.album_artist == ""
+        assert t.release_date == ""
+        assert t.track_number == 0
+        assert t.disc_number  == 0
+        assert t.total_tracks == 0
+
+    def test_full_metadata_construction(self):
+        t = TrackInfo(
+            title="Song", artists=["A1", "A2"],
+            album="Album", album_artist="A1",
+            year="2024", release_date="2024-03-15",
+            track_number=5, disc_number=1, total_tracks=12,
+        )
+        assert t.album_artist == "A1"
+        assert t.release_date == "2024-03-15"
+        assert t.track_number == 5
+        assert t.disc_number  == 1
+        assert t.total_tracks == 12
+
 
 class TestAudioMetadata:
     def test_artists_default_is_isolated_list(self):
