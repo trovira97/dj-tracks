@@ -357,7 +357,9 @@ class Toast(ctk.CTkFrame):
                          width=self._W, height=self._H)
         self.pack_propagate(False)
         self.grid_propagate(False)
-        self._root = root
+        # NOTE: do NOT name this `_root` — that shadows tkinter's Misc._root()
+        # method and breaks the whole widget tree ('CTk' object is not callable).
+        self._owner = root
 
         # Left accent strip.
         ctk.CTkFrame(self, width=4, fg_color=accent, corner_radius=0).place(
@@ -405,7 +407,7 @@ class Toast(ctk.CTkFrame):
         cls._active = live
         if not live:
             return
-        root = live[0]._root
+        root = live[0]._owner
         root.update_idletasks()
         rh = root.winfo_height()
         rw = root.winfo_width()
@@ -1140,6 +1142,7 @@ class SearchPanel(ctk.CTkFrame):
         return setup_text_drop(root, self._entry, _on_drop)
 
     def _set_platform(self, plat: str) -> None:
+        changed = self._platform_var.get() != plat
         self._platform_var.set(plat)
         for p, btn in self._chip_btns.items():
             color  = PLATFORM_COLORS.get(p, C["accent"]) if p != "auto" else C["accent"]
@@ -1148,6 +1151,14 @@ class SearchPanel(ctk.CTkFrame):
                 fg_color=color if active else C["surface"],
                 text_color="#000" if active else C["text_mid"],
                 border_color=color if active else C["border"])
+
+        # Re-run the search immediately when the platform changes, so the
+        # filter applies without the user pressing "Buscar" again.  Only for
+        # text queries — URL resolution ignores the platform filter anyway.
+        if changed and not self._searching:
+            query = self._search_var.get().strip()
+            if query and not query.startswith(("http://", "https://")):
+                self._do_search()
 
     def _do_search(self) -> None:
         query = self._search_var.get().strip()
