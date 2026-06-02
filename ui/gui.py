@@ -198,15 +198,57 @@ class _LRUImageCache:
 _COVER_CACHE = _LRUImageCache(maxsize=300)
 
 
+def _hex_to_rgb(h: str) -> Tuple[int, int, int]:
+    h = h.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
+
+
 def _placeholder(size: int) -> ctk.CTkImage:
-    img = Image.new("RGB", (size, size), C["border"])
+    """A subtle, theme-aware cover placeholder with a centred music glyph."""
+    from PIL import ImageDraw
+
+    # Soft vertical gradient from surface → card so it reads as a "frame"
+    # rather than a flat block while the real artwork loads.
+    top    = _hex_to_rgb(C["surface"])
+    bottom = _hex_to_rgb(C["card"])
+    img    = Image.new("RGB", (size, size), bottom)
+    draw   = ImageDraw.Draw(img)
+    for y in range(size):
+        t = y / max(1, size - 1)
+        draw.line(
+            [(0, y), (size, y)],
+            fill=(
+                int(top[0] + (bottom[0] - top[0]) * t),
+                int(top[1] + (bottom[1] - top[1]) * t),
+                int(top[2] + (bottom[2] - top[2]) * t),
+            ),
+        )
+
+    # Centred ♪ glyph, sized to the cover. Try a TrueType font for crisp
+    # scaling; fall back to a drawn circle if no font is available.
+    glyph_color = _hex_to_rgb(C["text_dim"])
     try:
-        from PIL import ImageDraw
-        draw = ImageDraw.Draw(img)
-        fs = max(10, size // 3)
-        draw.text((size // 2 - fs // 3, size // 2 - fs // 2), "♪", fill=C["text_dim"])
+        from PIL import ImageFont
+        fs   = max(12, int(size * 0.42))
+        font = None
+        for name in ("seguisym.ttf", "segoeui.ttf", "arial.ttf", "DejaVuSans.ttf"):
+            try:
+                font = ImageFont.truetype(name, fs)
+                break
+            except Exception:
+                continue
+        if font is not None:
+            box = draw.textbbox((0, 0), "♪", font=font)
+            tw, th = box[2] - box[0], box[3] - box[1]
+            draw.text(((size - tw) / 2 - box[0], (size - th) / 2 - box[1]),
+                      "♪", fill=glyph_color, font=font)
+        else:
+            raise RuntimeError("no font")
     except Exception:
-        pass
+        r = max(6, size // 6)
+        cx = cy = size // 2
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=glyph_color, width=max(1, size // 60))
+
     return ctk.CTkImage(light_image=img, dark_image=img, size=(size, size))
 
 
@@ -298,33 +340,88 @@ class StatusBadge(ctk.CTkLabel):
 
 
 class Toast(ctk.CTkFrame):
-    _COLORS = {"info": None, "success": "#00D48A", "error": "#FF4466"}
-    _W = 360
-    _H = 56
+    _W   = 360
+    _H   = 56
+    _GAP = 10                      # vertical gap between stacked toasts
+    _ICON = {"info": "ℹ", "success": "✓", "error": "✕"}
+
+    # Class-level registry of live toasts so multiple notifications stack
+    # instead of overlapping in the same corner.
+    _active: List["Toast"] = []
 
     def __init__(self, root: ctk.CTk, message: str, kind: str = "info", ms: int = 2800):
-        color = self._COLORS.get(kind) or C["accent"]
-        # CustomTkinter ≥ 5.2 requires width/height on the constructor, not on .place().
-        super().__init__(root, fg_color="#16162A", corner_radius=8,
-                         border_width=1, border_color=color,
+        accent = {"info": C["accent"], "success": C["success"], "error": C["error"]}.get(kind, C["accent"])
+        # Use a theme surface colour so the toast matches all four themes.
+        super().__init__(root, fg_color=C["card"], corner_radius=10,
+                         border_width=1, border_color=accent,
                          width=self._W, height=self._H)
         self.pack_propagate(False)
         self.grid_propagate(False)
+        self._root = root
+
+        # Left accent strip.
+        ctk.CTkFrame(self, width=4, fg_color=accent, corner_radius=0).place(
+            x=0, y=0, relheight=1)
+
+        # Icon badge.
+        ctk.CTkLabel(self, text=self._ICON.get(kind, "ℹ"), font=_font(15, "bold"),
+                     text_color=accent, width=26).pack(side="left", padx=(14, 0))
 
         ctk.CTkLabel(self, text=message, text_color=C["text"], font=_font(12),
-                     wraplength=320, justify="left").pack(padx=16, pady=10)
-        ctk.CTkFrame(self, width=3, fg_color=color, corner_radius=0).place(x=0, y=0, relheight=1)
+                     wraplength=290, justify="left", anchor="w").pack(
+                         side="left", fill="both", expand=True, padx=(6, 14), pady=10)
 
-        root.update_idletasks()
-        rw, rh = root.winfo_width(), root.winfo_height()
-        x = max(0, rw - self._W - 16)
-        y = max(0, rh - self._H - 16)
-        self.place(x=x, y=y)
+        Toast._active.append(self)
+        self._reposition_all()
+
+        # Slide-in: start a few px to the right, glide to rest.
+        self._target_x = max(0, root.winfo_width() - self._W - 16)
+        self._animate_in(self._target_x + 24)
+
         root.after(ms, self._safe_destroy)
+
+    def _animate_in(self, start_x: int) -> None:
+        target = self._target_x
+        x = start_x
+
+        def _step() -> None:
+            nonlocal x
+            if not self.winfo_exists():
+                return
+            x += (target - x) * 0.35
+            if abs(target - x) < 1:
+                x = target
+            cur_y = self.winfo_y()
+            self.place(x=int(x), y=cur_y)
+            if x != target:
+                self.after(16, _step)
+
+        _step()
+
+    @classmethod
+    def _reposition_all(cls) -> None:
+        """Stack all live toasts bottom-up in the lower-right corner."""
+        live = [t for t in cls._active if t.winfo_exists()]
+        cls._active = live
+        if not live:
+            return
+        root = live[0]._root
+        root.update_idletasks()
+        rh = root.winfo_height()
+        rw = root.winfo_width()
+        x  = max(0, rw - cls._W - 16)
+        y  = rh - cls._H - 16
+        for t in reversed(live):                      # newest at the bottom
+            t._target_x = x
+            t.place(x=x, y=max(0, y))
+            y -= (cls._H + cls._GAP)
 
     def _safe_destroy(self) -> None:
         try:
+            if self in Toast._active:
+                Toast._active.remove(self)
             self.destroy()
+            Toast._reposition_all()
         except Exception:
             pass
 
@@ -471,11 +568,13 @@ class TrackRow(ctk.CTkFrame, _TrackContextMenuMixin):
             return
         self._added = True
         self._btn.configure(text="✓", fg_color=C["success"], state="disabled")
+        self.configure(fg_color=C["done_tint"])
         self._on_add(self._track)
 
     def flash(self) -> None:
         self.configure(fg_color=C["card_hover"])
-        self.after(200, lambda: self.configure(fg_color=C["card"]))
+        self.after(200, lambda: self.configure(
+            fg_color=C["done_tint"] if self._added else C["card"]))
 
 
 class TrackCard(ctk.CTkFrame, _TrackContextMenuMixin):
@@ -486,13 +585,48 @@ class TrackCard(ctk.CTkFrame, _TrackContextMenuMixin):
 
     def __init__(self, parent, track: TrackInfo, on_add: Callable, **kw):
         super().__init__(parent, fg_color=C["card"], corner_radius=8,
-                         width=self._CARD_W, height=self._CARD_H, **kw)
+                         width=self._CARD_W, height=self._CARD_H,
+                         border_width=1, border_color=C["card"], **kw)
         self.grid_propagate(False)
         self._track  = track
         self._on_add = on_add
         self._added  = False
         self._build()
         self.bind("<Button-3>", lambda e, t=track: self._show_track_menu(e, t))
+        # Hover: lift the card with a coloured border + subtle bg change.
+        # Bind on the card and every non-interactive child so movement across
+        # children doesn't flicker; <Leave> re-checks the real pointer bounds.
+        self._hover_targets = [self]
+        self._bind_hover(self)
+
+    def _bind_hover(self, widget) -> None:
+        widget.bind("<Enter>", self._on_hover_enter, add="+")
+        widget.bind("<Leave>", self._on_hover_leave, add="+")
+        for child in widget.winfo_children():
+            if child is getattr(self, "_btn", None):
+                continue
+            self._bind_hover(child)
+
+    def _on_hover_enter(self, _event=None) -> None:
+        if self._added:
+            return
+        pc = PLATFORM_COLORS.get(self._track.platform, C["accent"])
+        self.configure(fg_color=C["card_hover"], border_color=pc)
+
+    def _on_hover_leave(self, _event=None) -> None:
+        if self._added:
+            return
+        # Only revert when the pointer has actually left the card's bounds —
+        # avoids flicker when moving between the card's own child widgets.
+        try:
+            px, py = self.winfo_pointerxy()
+            x0, y0 = self.winfo_rootx(), self.winfo_rooty()
+            x1, y1 = x0 + self.winfo_width(), y0 + self.winfo_height()
+            if x0 <= px < x1 and y0 <= py < y1:
+                return
+        except Exception:
+            pass
+        self.configure(fg_color=C["card"], border_color=C["card"])
 
     def _build(self) -> None:
         t  = self._track
@@ -530,11 +664,14 @@ class TrackCard(ctk.CTkFrame, _TrackContextMenuMixin):
             return
         self._added = True
         self._btn.configure(text="✓", fg_color=C["success"], state="disabled")
+        # Mark the whole card as added with a success-tinted border.
+        self.configure(fg_color=C["done_tint"], border_color=C["success"])
         self._on_add(self._track)
 
     def flash(self) -> None:
         self.configure(fg_color=C["card_hover"])
-        self.after(200, lambda: self.configure(fg_color=C["card"]))
+        self.after(200, lambda: self.configure(
+            fg_color=C["done_tint"] if self._added else C["card"]))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
