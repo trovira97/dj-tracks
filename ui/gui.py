@@ -868,12 +868,15 @@ class SearchPanel(ctk.CTkFrame):
         bar.pack(fill="x", padx=20, pady=(20, 0))
 
         self._search_var = ctk.StringVar()
+        # Magnifier glyph — signals "type to search" at a glance.
+        ctk.CTkLabel(bar, text="🔍", font=_font(14),
+                     text_color=C["text_dim"]).pack(side="left", padx=(14, 0))
         self._entry = ctk.CTkEntry(
             bar, textvariable=self._search_var,
-            placeholder_text="URL de Spotify / Apple Music / SoundCloud, o artista — canción…",
+            placeholder_text="Escribe un artista o canción  (o pega una URL)…",
             font=_font(12), fg_color="transparent",
             border_width=0, height=46, text_color=C["text"])
-        self._entry.pack(side="left", fill="x", expand=True, padx=(14, 0), pady=6)
+        self._entry.pack(side="left", fill="x", expand=True, padx=(8, 0), pady=6)
         self._entry.bind("<Return>",  lambda _: self._do_search())
         self._entry.bind("<Escape>",  lambda _: self._clear_entry())
 
@@ -955,6 +958,17 @@ class SearchPanel(ctk.CTkFrame):
             self._results_frame, text="",
             font=_font(13), text_color=C["text_dim"], justify="center")
 
+        # Initial hint so it's obvious you can search by name, not only by URL.
+        self._show_initial_hint()
+
+    def _show_initial_hint(self) -> None:
+        """Display a welcoming hint inviting free-text search."""
+        self._empty_lbl.configure(
+            text="🔍\n\nBusca por nombre de artista o canción\n"
+                 "—  o pega un enlace de Spotify · Apple Music · SoundCloud · Bandcamp\n\n"
+                 "Ejemplos:   daft punk one more time     ·     bicep glue     ·     fred again")
+        self._empty_lbl.pack(expand=True, pady=40)
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _on_query_change(self, *_) -> None:
@@ -967,6 +981,7 @@ class SearchPanel(ctk.CTkFrame):
         self._search_var.set("")
         self._status_lbl.configure(text="")
         self._clear_results()
+        self._show_initial_hint()
         self._entry.focus()
 
     def focus_search(self) -> None:
