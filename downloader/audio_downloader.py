@@ -242,12 +242,14 @@ class AudioDownloader:
             Platform.SOUNDCLOUD.value,
             Platform.BANDCAMP.value,
         }
-        if track.platform in direct_url_platforms and track.source_url:
+        is_direct = track.platform in direct_url_platforms and bool(track.source_url)
+        if is_direct:
             download_url = track.source_url
         else:
-            # YouTube Music search yields better audio streams (opus 160 kbps)
-            # than plain YouTube search (often opus 128 / m4a 128).
-            download_url = f"ytmusicsearch1:{self._build_yt_query(track)}"
+            # YouTube text search.  NOTE: yt-dlp only supports "ytsearch" —
+            # there is no "ytmusicsearch" scheme.  Audio quality is governed
+            # by ydl_opts["format_sort"] below, not by the search prefix.
+            download_url = f"ytsearch1:{self._build_yt_query(track)}"
 
         out_path = build_output_path(
             base_folder = task.output_dir,
@@ -259,6 +261,8 @@ class AudioDownloader:
         )
         out_path = get_unique_path(out_path)
         outtmpl  = str(out_path.with_suffix("")) + ".%(ext)s"
+
+        postprocessors = list(profile.yt_dlp_postprocessors())
 
         ydl_opts: dict = {
             "format":         profile.yt_dlp_format_str(),
@@ -273,8 +277,18 @@ class AudioDownloader:
             "quiet":          True,
             "no_warnings":    True,
             "progress_hooks": [lambda d: self._progress_hook(task, d)],
-            "postprocessors": profile.yt_dlp_postprocessors(),
         }
+
+        # For direct-source platforms (Bandcamp / SoundCloud) the source page
+        # carries authoritative metadata + cover art.  Let yt-dlp embed both
+        # straight from the source — far more reliable than re-fetching a
+        # possibly-stale cover URL from the search API.
+        if is_direct:
+            postprocessors.append({"key": "FFmpegMetadata", "add_metadata": True})
+            postprocessors.append({"key": "EmbedThumbnail", "already_have_thumbnail": False})
+            ydl_opts["writethumbnail"] = True
+
+        ydl_opts["postprocessors"] = postprocessors
         if self._ffmpeg_path:
             ydl_opts["ffmpeg_location"] = str(Path(self._ffmpeg_path).parent)
 

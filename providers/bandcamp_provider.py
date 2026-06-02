@@ -72,17 +72,18 @@ class BandcampProvider(MusicProvider):
             return None
         try:
             # img can be an int (image ID) or a full URL depending on endpoint
-            # version; normalise to a full URL.  Suffix _0 returns the original
-            # uploaded artwork (typically 1500×1500) instead of _10 (350×350).
+            # version; normalise to a full URL.  Suffix _10 = 1200×1200 — high
+            # quality AND reliably served (the _0 "original" often 404s on the
+            # public CDN, especially for search-result thumbnails).
             img = r.get("img") or ""
             if isinstance(img, int):
-                img = f"https://f4.bcbits.com/img/a{img}_0.jpg"
+                img = f"https://f4.bcbits.com/img/a{img}_10.jpg"
             elif img and not img.startswith("http"):
                 img = f"https://f4.bcbits.com{img}"
             else:
-                # Already a URL — bump common downscale suffixes to _0.
-                img = re.sub(r"_(2|3|4|5|6|7|8|9|10|11|13|16|17|20)\.(jpg|png)$",
-                             r"_0.\2", img)
+                # Already a URL — bump common small downscale suffixes to _10.
+                img = re.sub(r"_(2|3|4|5|6|7|8|9|16|17|20)\.(jpg|png)$",
+                             r"_10.\2", img)
 
             title  = (r.get("name") or "").strip() or "Unknown"
             artist = (r.get("band_name") or "").strip() or "Unknown"

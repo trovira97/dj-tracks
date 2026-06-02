@@ -253,10 +253,26 @@ class AppController:
 
         success = self.downloader.download(task)
 
-        if success and task.output_path and self._config.get("auto_fix_metadata", True):
+        # Bandcamp / SoundCloud download natively from the source page, so
+        # yt-dlp already embedded authoritative metadata + cover art.  Running
+        # our own post-process would overwrite that with the provider's thinner
+        # search-API data (and a sometimes-dead cover URL), so we skip it.
+        direct_platforms = {Platform.BANDCAMP.value, Platform.SOUNDCLOUD.value}
+        should_post = (
+            success
+            and task.output_path
+            and self._config.get("auto_fix_metadata", True)
+            and task.track.platform not in direct_platforms
+        )
+
+        if should_post:
+            # download() already set DONE; switch to PROCESSING for the metadata
+            # pass, then restore DONE so the task reaches a terminal state.
             task.status = DownloadStatus.PROCESSING
             self._notify(task)
             self._post_process(task)
+            task.status   = DownloadStatus.DONE
+            task.progress = 100.0
 
         self._notify(task)
 

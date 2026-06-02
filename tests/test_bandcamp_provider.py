@@ -79,8 +79,8 @@ class TestSearch:
         assert results[0].source_url == "https://neoncars.bandcamp.com/track/midnight-drive"
         assert results[0].cover_url.startswith("https://f4.bcbits.com/")
 
-        # Numeric img IDs are converted to full URLs at original resolution (_0).
-        assert "f4.bcbits.com/img/a456789_0" in results[1].cover_url
+        # Numeric img IDs are converted to full URLs at 1200x1200 (_10).
+        assert "f4.bcbits.com/img/a456789_10" in results[1].cover_url
 
     def test_skips_non_track_items(self, provider):
         payload = {
