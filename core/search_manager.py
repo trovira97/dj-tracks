@@ -94,12 +94,18 @@ class SearchManager:
             if not provider:
                 log.warning(f"[SearchManager] Proveedor no disponible: {platform}")
                 return []
-            return provider.search(query, limit=limit)
+            # Even single-platform results benefit from dedup (some providers
+            # legitimately return the same track twice with different IDs).
+            return self._deduplicate(provider.search(query, limit=limit))
 
         if not self._providers:
             return []
 
-        per_provider = max(1, limit // len(self._providers) + 1)
+        # Ask each provider for the full `limit` (not limit/n).  Tracks then
+        # compete on dedup before we truncate to `limit` — otherwise platforms
+        # that return fewer results than their share waste their quota and
+        # the final list is much smaller than expected.
+        per_provider = max(limit, 10)
         results: List[TrackInfo] = []
 
         with ThreadPoolExecutor(

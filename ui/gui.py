@@ -1046,15 +1046,54 @@ class SearchPanel(ctk.CTkFrame):
         cols = max(2, w // (TrackCard._CARD_W + 12))
         return min(cols, 5)
 
+    def _platform_unavailable_hint(self, plat: str) -> str:
+        """
+        If the user-selected single platform is known to be unavailable
+        (no credentials, offline provider, etc.), return a one-line hint
+        explaining why no results came back.  Returns "" for "auto" and
+        for healthy platforms.
+        """
+        if plat == "auto":
+            return ""
+        from utils.validators import Platform
+        plat_enum = {
+            "spotify":    Platform.SPOTIFY,
+            "applemusic": Platform.APPLE_MUSIC,
+            "soundcloud": Platform.SOUNDCLOUD,
+            "bandcamp":   Platform.BANDCAMP,
+        }.get(plat)
+        if not plat_enum:
+            return ""
+        provider = self._ctrl.search_manager.provider_for(plat_enum)
+        if provider is None:
+            return f"Proveedor '{plat}' no registrado"
+        if not getattr(provider, "available", True):
+            label = self._PLAT_DISPLAY.get(plat, plat)
+            if plat == "spotify":
+                return f"{label} no disponible — añade Client ID y Secret en Ajustes"
+            return f"{label} no disponible en este momento"
+        return ""
+
     def _show_results(self, results: List[TrackInfo]) -> None:
         self._last_results = list(results)
         self._clear_results()
         if not results:
-            diag = self._ctrl.search_diagnostics()
-            hint = f"  ({'; '.join(diag)})" if diag else ""
-            self._status_lbl.configure(text=f"Sin resultados.{hint}",
-                                       text_color=C["text_dim"])
-            self._empty_lbl.configure(text="♪\n\nSin resultados para esta búsqueda.")
+            # When the user explicitly filtered to a single platform and got
+            # nothing back, the most useful feedback is whether that platform
+            # is actually reachable / configured.
+            current_plat = self._platform_var.get()
+            specific_hint = self._platform_unavailable_hint(current_plat)
+            if specific_hint:
+                self._status_lbl.configure(text=specific_hint, text_color=C["warning"])
+                self._empty_lbl.configure(
+                    text=f"⚠\n\n{specific_hint}\n\nPrueba con 'Todas' o configura "
+                         "las credenciales en Ajustes.")
+            else:
+                diag = self._ctrl.search_diagnostics()
+                hint = f"  ({'; '.join(diag)})" if diag else ""
+                self._status_lbl.configure(text=f"Sin resultados.{hint}",
+                                           text_color=C["text_dim"])
+                self._empty_lbl.configure(text="♪\n\nSin resultados para esta búsqueda.")
             self._empty_lbl.pack(expand=True, pady=50)
             return
 
