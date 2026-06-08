@@ -1,7 +1,15 @@
 @echo off
 setlocal
 cd /d "%~dp0\.."
-set "PYEXE=C:\Users\thiba\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+rem Detect Python: prefer the system Python 3.12 that has all dependencies
+rem (tls_client, spotdl, spotipy, mutagen, etc. needed for PyInstaller hooks).
+rem The codex-runtimes Python lacks these packages and will produce an incomplete bundle.
+for %%P in (
+    "C:\Users\thiba\AppData\Local\Programs\Python\Python312\python.exe"
+    "C:\Users\thiba\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+) do (
+    if not defined PYEXE if exist %%P set "PYEXE=%%~P"
+)
 set "ISCC=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 
 echo =====================================================
@@ -9,9 +17,9 @@ echo   DJ Tracks  -  Build pipeline
 echo =====================================================
 echo.
 
-if not exist "%PYEXE%" (
-    echo [ERROR] No se encuentra Python en: %PYEXE%
-    echo         Edita esta linea en build\build.bat con la ruta correcta.
+if not defined PYEXE (
+    echo [ERROR] No se encontro ningun interprete Python compatible.
+    echo         Instala Python 3.10+ desde python.org o edita build\build.bat.
     pause
     exit /b 1
 )

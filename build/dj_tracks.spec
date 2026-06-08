@@ -73,7 +73,9 @@ a = Analysis(
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
-    hookspath=[],
+    # Register the vendored yt_dlp hook dir so that if the system-installed
+    # yt_dlp is absent or a different version, the bundled hook still fires.
+    hookspath=[str(ROOT / ".vendor" / "yt_dlp" / "__pyinstaller")],
     hooksconfig={},
     runtime_hooks=[],
     excludes=excludes,
