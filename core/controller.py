@@ -76,6 +76,7 @@ class AppController:
         # only their status changes so the UI can reflect the final state).
         self._queue: List[DownloadTask] = []
         self._queue_lock = threading.Lock()
+        self._dedup_lock = threading.Lock()   # guards the shared fingerprint index
 
         # Thread pool — max concurrent downloads bounded by config and hard cap.
         max_workers = min(int(self._config.get("threads", 2)), _MAX_WORKERS)
@@ -314,6 +315,11 @@ class AppController:
             task.status   = DownloadStatus.DONE
             task.progress = 100.0
 
+        # Acoustic-duplicate guard on the finished file (after enrichment so
+        # the final, possibly DJ-renamed file is the one fingerprinted).
+        if success and task.output_path and self._config.get("dedupe_audio_fp", False):
+            self._dedup_check(task)   # may flip status to ERROR + delete the file
+
         self._notify(task)
 
     def _post_process(self, task: DownloadTask) -> None:
@@ -329,6 +335,76 @@ class AppController:
                 log.info(f"[Controller] Metadatos corregidos en {path.name}: {corrections}")
         except Exception as exc:
             log.error(f"[Controller] Error en post-proceso: {exc}")
+
+    def _dedup_check(self, task: DownloadTask) -> bool:
+        """
+        Acoustic-duplicate guard.  Computes a Chromaprint fingerprint of the
+        finished file and compares it against an index of everything already
+        in the download folder.  If it matches an existing track (even with a
+        different name / bitrate), the new file is deleted and the task is
+        flagged as a duplicate.
+
+        Returns ``True`` if the file was a duplicate and removed.
+        Gated by config ``dedupe_audio_fp``; a no-op when disabled.
+        """
+        if not (task.output_path and self._config.get("dedupe_audio_fp", False)):
+            return False
+        try:
+            from metadata import dj_metadata
+        except Exception:
+            return False
+
+        ffmpeg = getattr(self.downloader, "_ffmpeg_path", None) or "ffmpeg"
+        if not dj_metadata.chromaprint_available(ffmpeg):
+            log.info("[Controller] Dedup omitido — este ffmpeg no soporta Chromaprint")
+            return False
+
+        fpath  = Path(task.output_path)
+        folder = Path(task.output_dir)
+        idx_path = folder / ".dj_tracks_fp.json"
+        threshold = float(self._config.get("dedupe_audio_fp_threshold", 0.92))
+
+        # Serialise dedup across worker threads (shared index file).
+        with self._dedup_lock:
+            index: Dict[str, list] = {}
+            try:
+                if idx_path.exists():
+                    index = json.loads(idx_path.read_text(encoding="utf-8")) or {}
+            except Exception:
+                index = {}
+
+            fp = dj_metadata.chromaprint_fingerprint(str(fpath), ffmpeg)
+            if not fp:
+                return False
+            fp = fp[:200]
+
+            for rel, other in index.items():
+                try:
+                    if (folder / rel).resolve() == fpath.resolve():
+                        continue
+                except Exception:
+                    pass
+                if dj_metadata.fp_similarity(fp, other) >= threshold:
+                    # Duplicate — remove the new file and flag the task.
+                    try:
+                        fpath.unlink()
+                    except Exception:
+                        return False
+                    task.status    = DownloadStatus.ERROR
+                    task.error_msg = "♻ Duplicado acústico — ya en tu librería"
+                    log.info(f"[Controller] Duplicado eliminado: {fpath.name}")
+                    return True
+
+            # Not a duplicate — record its fingerprint.
+            try:
+                index[str(fpath.relative_to(folder))] = fp
+            except Exception:
+                index[fpath.name] = fp
+            try:
+                idx_path.write_text(json.dumps(index), encoding="utf-8")
+            except Exception:
+                pass
+        return False
 
     def _dj_enrich(self, task: DownloadTask) -> None:
         """

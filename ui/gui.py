@@ -1917,6 +1917,7 @@ class SettingsPanel(ctk.CTkFrame):
         self._dj_filename_var  = ctk.BooleanVar(value=self._ctrl.get_config("dj_filename", False))
         self._dj_replaygain_var = ctk.BooleanVar(value=self._ctrl.get_config("dj_replaygain", False))
         self._dj_quality_var   = ctk.BooleanVar(value=self._ctrl.get_config("dj_quality_check", False))
+        self._dedup_var        = ctk.BooleanVar(value=self._ctrl.get_config("dedupe_audio_fp", False))
 
         self._switch_row(dj_card, "Análisis DJ (BPM · Tonalidad · Camelot)",
                          "Escribe BPM, clave musical y código Camelot en cada archivo (mezcla armónica)",
@@ -1943,9 +1944,21 @@ class SettingsPanel(ctk.CTkFrame):
         self._switch_row(dj_card, "Avisar si la calidad real es baja",
                          "Detecta cuando un «320 kbps» es en realidad un re-encode de baja calidad",
                          self._dj_quality_var)
+        self._switch_row(dj_card, "Evitar duplicados (huella acústica)",
+                         "Compara cada descarga con tu librería y descarta duplicados aunque tengan otro nombre (requiere ffmpeg con Chromaprint)",
+                         self._dedup_var)
 
         # ── API Credentials ───────────────────────────────────────────────────
-        SectionLabel(scroll, "Credenciales de API").pack(anchor="w", pady=(16, 8))
+        cred_hdr = ctk.CTkFrame(scroll, fg_color="transparent")
+        cred_hdr.pack(fill="x", pady=(16, 8))
+        SectionLabel(cred_hdr, "Credenciales de API").pack(side="left")
+        ctk.CTkButton(
+            cred_hdr, text="❓  ¿Cómo configurar Spotify?", height=26,
+            font=_font(9, "bold"), fg_color=C["surface"],
+            hover_color=C["card_hover"], text_color=C["spotify"],
+            corner_radius=5, command=self._handle_show_setup_wizard,
+        ).pack(side="right")
+
         api_card = self._card(scroll)
         sp_cfg   = self._ctrl.get_config("spotify",    {})
         sc_cfg   = self._ctrl.get_config("soundcloud", {})
@@ -2073,6 +2086,12 @@ class SettingsPanel(ctk.CTkFrame):
         from ui.donations import show_donations
         show_donations(self.winfo_toplevel(), C)
 
+    def _handle_show_setup_wizard(self) -> None:
+        from ui.setup_wizard import show_setup_wizard
+        # The wizard's "Ir a Ajustes" button is a no-op here (we're already
+        # in Settings) — just close the dialog.
+        show_setup_wizard(self.winfo_toplevel(), C, on_open_settings=None)
+
     def _handle_create_shortcut(self) -> None:
         from tkinter import messagebox
         try:
@@ -2157,6 +2176,7 @@ class SettingsPanel(ctk.CTkFrame):
             "dj_filename":        self._dj_filename_var.get(),
             "dj_replaygain":      self._dj_replaygain_var.get(),
             "dj_quality_check":   self._dj_quality_var.get(),
+            "dedupe_audio_fp":    self._dedup_var.get(),
             "spotify":    {"client_id": self._sp_id_var.get(),
                            "client_secret": self._sp_secret_var.get()},
             "soundcloud": {"client_id": self._sc_id_var.get()},

@@ -9,18 +9,31 @@ Bundles:
   - CustomTkinter data files
   - mutagen submodules (dynamically imported by format)
   - PIL ImageTk support
+  - tls_client native DLL (spotdl dep — must be collected explicitly)
 
 Build with:
     py -m PyInstaller --noconfirm --clean build/dj_tracks.spec
 """
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_all
 
 ROOT = Path(SPECPATH).parent
+
+# ── tls_client — native DLL must be bundled explicitly ───────────────────────
+# spotdl installs tls_client, which carries a native DLL
+# (tls-client-64.dll on Windows).  PyInstaller bundles the .py files but
+# misses the DLL unless we call collect_all here.  Without this, the app
+# crashes on any machine where spotdl is not installed at the system level.
+_tls_datas, _tls_binaries, _tls_hidden = [], [], []
+try:
+    _tls_datas, _tls_binaries, _tls_hidden = collect_all("tls_client")
+except Exception:
+    pass  # tls_client not present in this build env — safe to skip
 
 # ── Bundled data ──────────────────────────────────────────────────────────────
 datas = []
 datas += collect_data_files("customtkinter")
+datas += _tls_datas
 
 # ffmpeg goes to the bundle root so audio_downloader._find_ffmpeg picks it up.
 if (ROOT / "ffmpeg.exe").exists():
@@ -30,9 +43,14 @@ if (ROOT / "ffmpeg.exe").exists():
 if (ROOT / "assets").exists():
     datas.append((str(ROOT / "assets"), "assets"))
 
+# ── Binaries (native shared libraries) ───────────────────────────────────────
+binaries = []
+binaries += _tls_binaries
+
 # ── Hidden imports ────────────────────────────────────────────────────────────
 hiddenimports = []
 hiddenimports += collect_submodules("mutagen")
+hiddenimports += _tls_hidden
 hiddenimports += [
     "PIL._tkinter_finder",
     "PIL.ImageTk",
@@ -41,7 +59,7 @@ hiddenimports += [
 # ── Modules to leave out (huge & unused at runtime) ───────────────────────────
 excludes = [
     "pytest",
-    "spotdl",          # only used for ffmpeg detection fallback; not at runtime
+    "spotdl",          # Python package not imported; only its ffmpeg path is checked on disk
     "tests",
     "matplotlib",
     "numpy.tests",
@@ -52,7 +70,7 @@ excludes = [
 a = Analysis(
     [str(ROOT / "main.py")],
     pathex=[str(ROOT)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
