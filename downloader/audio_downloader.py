@@ -1,17 +1,21 @@
 """
 downloader/audio_downloader.py
 ================================
-Audio download engine powered by yt-dlp.
+Dual-engine audio download: **spotdl + yt-dlp**.
 
-Strategy per platform:
+Engine routing (automatic, no user intervention):
 
-- **SoundCloud**: direct URL download (stream available).
-- **Spotify / Apple Music**: YouTube Music text search
-  (``ytsearch1:{artist} {title} official audio``).
-- **Unknown**: YouTube Music search using whatever metadata is available.
+- **Spotify / Apple Music** → primary: **spotdl** (uses the Spotify API for
+  exact metadata match, then orchestrates yt-dlp with multiple
+  audio-providers and retries).  If spotdl fails or isn't installed,
+  falls back to **yt-dlp** with a YouTube text search.
+- **SoundCloud / Bandcamp** → **yt-dlp** direct on the source URL (no
+  search needed — the URL itself is downloadable, faster, and yields
+  authoritative metadata + cover art from the source page).
+- **Unknown** → yt-dlp YouTube text search.
 
-Cancellation is implemented via a per-task flag that is checked
-inside yt-dlp's progress hook.  Active downloads stop at the next
+Cancellation is implemented via a per-task flag that is checked inside
+the progress hooks of both engines.  Active downloads stop at the next
 progress callback, which is typically within a second.
 """
 from __future__ import annotations
@@ -124,6 +128,8 @@ class AudioDownloader:
         self._flags_lock   = threading.Lock()
         # Global pause flag — when set, progress hooks block until cleared.
         self._paused = threading.Event()
+        # Serialise spotdl client construction (SpotifyClient is a singleton).
+        self._spotdl_lock = threading.Lock()
 
     # ── Pause / resume ────────────────────────────────────────────────────────
 
@@ -213,17 +219,55 @@ class AudioDownloader:
             except Exception:
                 pass
 
+    # ── Engine router ─────────────────────────────────────────────────────────
+
+    # spotdl shines when the source has a real Spotify track ID (or a Spotify
+    # URL).  For those it queries the Spotify API for exact metadata and then
+    # asks its audio providers (youtube-music, youtube, soundcloud) for the
+    # best match — far less prone to "wrong song" hits than a raw text search.
+    _SPOTDL_PLATFORMS = {Platform.SPOTIFY.value, Platform.APPLE_MUSIC.value}
+
     def download(self, task: DownloadTask) -> bool:
         """
         Download the audio for *task*.
 
+        Routes the work to the best engine for the platform.  spotdl is the
+        primary engine for Spotify / Apple Music; yt-dlp is primary for
+        SoundCloud / Bandcamp (direct URL download) and is also the fallback
+        engine when spotdl fails.
+
         Returns:
             ``True`` on success, ``False`` on error or cancellation.
-
-        Side effects:
-            Updates ``task.status``, ``task.progress``, ``task.output_path``,
-            and ``task.error_msg`` in-place.
         """
+        # Register the task as not-cancelled before starting.
+        with self._flags_lock:
+            self._cancel_flags[task.task_id] = False
+
+        track = task.track
+        prefer_spotdl = track.platform in self._SPOTDL_PLATFORMS
+
+        if prefer_spotdl:
+            ok = self._download_spotdl(task)
+            if ok or task.status == DownloadStatus.CANCELLED:
+                with self._flags_lock:
+                    self._cancel_flags.pop(task.task_id, None)
+                return ok
+            log.info(f"[Downloader] spotdl falló para «{task.display_name}» — "
+                     f"intentando con yt-dlp como respaldo")
+            # Reset progress for the fallback attempt; keep cancel flag.
+            task.error_msg = ""
+            task.progress  = 0.0
+
+        ok = self._download_ytdlp(task)
+        with self._flags_lock:
+            self._cancel_flags.pop(task.task_id, None)
+        return ok
+
+    # ── yt-dlp engine ─────────────────────────────────────────────────────────
+
+    def _download_ytdlp(self, task: DownloadTask) -> bool:
+        """yt-dlp engine — direct URL for SoundCloud/Bandcamp, YT text search
+        for everything else."""
         try:
             import yt_dlp  # type: ignore[import]
         except ImportError:
@@ -292,13 +336,9 @@ class AudioDownloader:
         if self._ffmpeg_path:
             ydl_opts["ffmpeg_location"] = str(Path(self._ffmpeg_path).parent)
 
-        # Register the task as not-cancelled before starting.
-        with self._flags_lock:
-            self._cancel_flags[task.task_id] = False
-
         task.status = DownloadStatus.DOWNLOADING
         self._notify(task, 5, "Iniciando descarga…")
-        log.info(f"[Downloader] Iniciando: {track.artist_str} — {track.title}")
+        log.info(f"[Downloader yt-dlp] Iniciando: {track.artist_str} — {track.title}")
 
         # Try the primary attempt; on failure, try a relaxed last-resort that
         # drops the strict format selector and accepts whatever stream the
@@ -330,11 +370,9 @@ class AudioDownloader:
                 task.progress = 100.0
                 self._notify(task, 100, "Completado")
                 if label == "last-resort":
-                    log.info(f"[Downloader] Completado (last-resort) : {task.output_path}")
+                    log.info(f"[Downloader yt-dlp] Completado (last-resort): {task.output_path}")
                 else:
-                    log.info(f"[Downloader] Completado: {task.output_path}")
-                with self._flags_lock:
-                    self._cancel_flags.pop(task.task_id, None)
+                    log.info(f"[Downloader yt-dlp] Completado: {task.output_path}")
                 return True
 
             except _DownloadCancelled:
@@ -342,25 +380,178 @@ class AudioDownloader:
                 task.error_msg = ""
                 task.progress  = 0.0
                 self._notify(task, 0, "Cancelado")
-                log.info(f"[Downloader] Cancelado por el usuario: {track.artist_str} — {track.title}")
-                with self._flags_lock:
-                    self._cancel_flags.pop(task.task_id, None)
+                log.info(f"[Downloader yt-dlp] Cancelado por el usuario: {track.artist_str} — {track.title}")
                 return False
 
             except Exception as exc:
                 last_exc = exc
-                log.warning(f"[Downloader] Intento {label} falló: {exc}")
-                # Carry on to the next attempt unless we ran out.
+                log.warning(f"[Downloader yt-dlp] Intento {label} falló: {exc}")
                 continue
 
         # All attempts exhausted.
         task.status    = DownloadStatus.ERROR
         task.error_msg = self._humanise_error(str(last_exc) if last_exc else "Error desconocido")
         self._notify(task, 0, f"Error: {task.error_msg}")
-        log.error(f"[Downloader] Error definitivo tras reintentos: {last_exc}")
-        with self._flags_lock:
-            self._cancel_flags.pop(task.task_id, None)
+        log.error(f"[Downloader yt-dlp] Error definitivo tras reintentos: {last_exc}")
         return False
+
+    # ── spotdl engine ─────────────────────────────────────────────────────────
+
+    def _download_spotdl(self, task: DownloadTask) -> bool:
+        """spotdl engine — primary for Spotify / Apple Music.
+
+        spotdl uses the Spotify API to fetch the canonical metadata for a
+        track, then orchestrates yt-dlp across several audio providers
+        (youtube-music → youtube → soundcloud) until it finds the best
+        match.  Far more reliable than a raw text search for those two
+        platforms.
+
+        Returns False (no traceback) on any failure so the caller can fall
+        back to plain yt-dlp.
+        """
+        try:
+            from spotdl import Spotdl as _Spotdl
+            from spotdl.types.song import Song as _Song
+            from spotdl.utils.spotify import SpotifyClient as _SC
+        except Exception as exc:
+            log.info(f"[Downloader spotdl] No disponible: {exc}")
+            return False
+
+        track   = task.track
+        profile = task.profile
+
+        # spotdl needs Spotify credentials.  We read them lazily from the
+        # main settings.json (same file the controller uses).
+        cid, cs = self._read_spotify_creds()
+        if not (cid and cs):
+            log.info("[Downloader spotdl] Sin credenciales Spotify — fallback a yt-dlp")
+            return False
+
+        # Compute the output template that spotdl will use.  Mirror the
+        # user's folder structure so spotdl files end up exactly where yt-dlp
+        # files would.
+        out_path = build_output_path(
+            base_folder = task.output_dir,
+            artist      = track.artist_str,
+            album       = track.album or "Singles",
+            title       = track.title,
+            ext         = profile.format.value if profile.format.value != "best" else "mp3",
+            structure   = task.structure,
+        )
+        out_path = get_unique_path(out_path)
+        out_template = str(out_path.with_suffix(""))   # spotdl appends the codec ext
+
+        fmt     = profile.format.value if profile.format.value != "best" else "mp3"
+        bitrate = profile.quality.value if profile.quality.value != "best" else "320k"
+
+        settings = {
+            "output":          out_template,
+            "format":          fmt,
+            "bitrate":         bitrate,
+            "threads":         1,             # one task = one download
+            "ffmpeg":          self._ffmpeg_path or "ffmpeg",
+            "audio_providers": ["youtube-music", "youtube", "soundcloud"],
+            "simple_tui":      True,
+            "print_errors":    False,
+            "log_format":      None,
+        }
+
+        task.status = DownloadStatus.DOWNLOADING
+        self._notify(task, 5, "Buscando con spotdl…")
+        log.info(f"[Downloader spotdl] Iniciando: {track.artist_str} — {track.title}")
+
+        # Spotdl/SpotifyClient is a class-level singleton — reset before
+        # building a new client with our credentials.
+        try:
+            _SC._instance = None
+        except Exception:
+            pass
+
+        try:
+            with self._spotdl_lock:
+                client = _Spotdl(
+                    client_id=cid, client_secret=cs,
+                    downloader_settings=settings,
+                )
+        except Exception as exc:
+            log.warning(f"[Downloader spotdl] Init falló: {exc}")
+            return False
+
+        # spotdl needs either a Spotify URL or a query.  Prefer the URL when
+        # available; fall back to "Artist - Title" for Apple Music tracks
+        # (no spotdl-resolvable URL).
+        query = (track.source_url if track.platform == Platform.SPOTIFY.value
+                                  and track.source_url
+                                 else f"{track.artist_str} - {track.title}")
+
+        try:
+            songs = client.search([query])
+        except Exception as exc:
+            log.warning(f"[Downloader spotdl] Search falló: {exc}")
+            return False
+        if not songs:
+            log.info("[Downloader spotdl] Sin resultados — fallback")
+            return False
+
+        # spotdl download loop (one song at a time).  We check the cancel
+        # flag between calls and via the asyncio.set_event_loop incantation
+        # that spotdl requires from a worker thread.
+        import asyncio
+        try:
+            asyncio.set_event_loop(client.downloader.loop)
+        except Exception:
+            pass
+
+        with self._flags_lock:
+            if self._cancel_flags.get(task.task_id):
+                raise _DownloadCancelled()
+
+        self._notify(task, 30, "Descargando con spotdl…")
+        try:
+            results = client.download_songs(songs[:1])
+        except Exception as exc:
+            log.warning(f"[Downloader spotdl] Download falló: {exc}")
+            return False
+
+        if not results:
+            return False
+        _song, path = results[0]
+        if path is None:
+            log.info("[Downloader spotdl] No se pudo descargar — fallback")
+            return False
+
+        try:
+            task.output_path = Path(str(path))
+        except Exception:
+            task.output_path = None
+
+        task.status   = DownloadStatus.DONE
+        task.progress = 100.0
+        self._notify(task, 100, "Completado")
+        log.info(f"[Downloader spotdl] Completado: {task.output_path}")
+        return True
+
+    def _read_spotify_creds(self) -> tuple:
+        """Look up Spotify credentials in the standard config locations.
+
+        Same fall-through used by the controller, but we re-implement here
+        so the downloader stays decoupled from AppController.
+        """
+        import json, os as _os
+        cid = _os.environ.get("SPOTIFY_CLIENT_ID")     or ""
+        cs  = _os.environ.get("SPOTIFY_CLIENT_SECRET") or ""
+        if cid and cs:
+            return (cid, cs)
+        try:
+            from utils.paths import config_dir
+            cfg_path = config_dir() / "settings.json"
+            if cfg_path.exists():
+                data = json.loads(cfg_path.read_text(encoding="utf-8"))
+                sp = data.get("spotify", {}) or {}
+                return (sp.get("client_id", ""), sp.get("client_secret", ""))
+        except Exception:
+            pass
+        return ("", "")
 
     def cancel(self, task_id: str) -> None:
         """

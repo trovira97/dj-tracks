@@ -6,6 +6,10 @@ customtkinter>=5.2.0
 Pillow>=10.0.0
 
 # ── Audio download ────────────────────────────────────────────────────────────
+# Dual engine: spotdl is preferred for Spotify/Apple Music (exact match via
+# Spotify API + multi-provider retry), yt-dlp is preferred for SoundCloud/
+# Bandcamp (direct URL download) and is the automatic fallback when spotdl
+# can't deliver.  Both are required.
 yt-dlp>=2024.1.1
 spotdl>=4.2.0
 
