@@ -136,6 +136,30 @@ class BandcampProvider(MusicProvider):
                 tracks.append(info)
         return tracks
 
+    def search_albums(self, query: str, limit: int = 10) -> List[TrackInfo]:
+        """Search Bandcamp albums (search_filter='a').  The album URL resolves
+        to all its tracks via :meth:`get_tracks_from_url`."""
+        payload = {"search_text": query, "search_filter": "a",
+                   "full_page": True, "fan_id": None}
+        try:
+            resp = self._session.post(self.SEARCH_URL, json=payload, timeout=12)
+            resp.raise_for_status()
+            data = resp.json() or {}
+        except Exception as exc:
+            log.error(f"[Bandcamp] Error en búsqueda de álbumes: {exc}")
+            return []
+        results = (data.get("auto") or {}).get("results") or []
+        out: List[TrackInfo] = []
+        for r in results[:limit]:
+            if r.get("type") and r.get("type") != "a":
+                continue
+            info = self._result_to_info(r)
+            if info:
+                info.is_album = True
+                info.album    = info.title
+                out.append(info)
+        return out
+
     def get_track(self, url_or_id: str) -> Optional[TrackInfo]:
         """Bandcamp identifiers are URLs; trying to ``GET`` a bare ID isn't useful."""
         if not url_or_id.startswith("http"):

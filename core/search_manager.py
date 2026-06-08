@@ -72,19 +72,21 @@ class SearchManager:
         query: str,
         platform: Platform = Platform.UNKNOWN,
         limit: int = 20,
+        include_albums: bool = True,
     ) -> List[TrackInfo]:
         """
-        Search by text query.
+        Search by text query for tracks (and optionally whole albums).
 
         Single-platform requests go directly to that provider.
         Multi-platform (``Platform.UNKNOWN``) runs all providers
-        concurrently in a thread pool.
+        concurrently in a thread pool.  Album results (``is_album``) are
+        listed first.
 
         Args:
-            query:    Search string (artist, title, or freeform).
-            platform: Restrict to a specific provider, or
-                      ``Platform.UNKNOWN`` to search all.
-            limit:    Maximum total results to return.
+            query:          Search string (artist, title, or freeform).
+            platform:       Restrict to a provider, or ``UNKNOWN`` for all.
+            limit:          Maximum total track results.
+            include_albums: Also return album/set results (shown first).
 
         Returns:
             Deduplicated list of :class:`~providers.TrackInfo`.
@@ -94,36 +96,47 @@ class SearchManager:
             if not provider:
                 log.warning(f"[SearchManager] Proveedor no disponible: {platform}")
                 return []
-            # Even single-platform results benefit from dedup (some providers
-            # legitimately return the same track twice with different IDs).
-            return self._deduplicate(provider.search(query, limit=limit))
+            albums = []
+            if include_albums and hasattr(provider, "search_albums"):
+                try:
+                    albums = provider.search_albums(query, limit=max(4, limit // 3))
+                except Exception as exc:
+                    log.error(f"[SearchManager] Álbumes {platform}: {exc}")
+            tracks = self._deduplicate(provider.search(query, limit=limit))
+            return self._deduplicate(albums) + tracks
 
         if not self._providers:
             return []
 
-        # Ask each provider for the full `limit` (not limit/n).  Tracks then
-        # compete on dedup before we truncate to `limit` — otherwise platforms
-        # that return fewer results than their share waste their quota and
-        # the final list is much smaller than expected.
         per_provider = max(limit, 10)
-        results: List[TrackInfo] = []
+        # Build the task list: album searches first (so they rank on top),
+        # then track searches.
+        tasks = []
+        if include_albums:
+            for plat, p in self._providers.items():
+                if hasattr(p, "search_albums"):
+                    tasks.append(("album", plat, lambda p=p: p.search_albums(query, max(4, limit // 3))))
+        for plat, p in self._providers.items():
+            tasks.append(("track", plat, lambda p=p: p.search(query, per_provider)))
 
+        albums: List[TrackInfo] = []
+        tracks: List[TrackInfo] = []
         with ThreadPoolExecutor(
-            max_workers=len(self._providers),
+            max_workers=max(2, len(tasks)),
             thread_name_prefix="dj-search",
         ) as pool:
-            futures = {
-                pool.submit(p.search, query, per_provider): plat
-                for plat, p in self._providers.items()
-            }
+            futures = {pool.submit(fn): kind for kind, plat, fn in tasks}
             for fut in as_completed(futures):
-                plat = futures[fut]
                 try:
-                    results.extend(fut.result())
+                    res = fut.result()
                 except Exception as exc:
-                    log.error(f"[SearchManager] Error en {plat}: {exc}")
+                    log.error(f"[SearchManager] Error: {exc}")
+                    continue
+                (albums if futures[fut] == "album" else tracks).extend(res)
 
-        return self._deduplicate(results)[:limit]
+        albums = self._deduplicate(albums)[:max(4, limit // 3)]
+        tracks = self._deduplicate(tracks)
+        return (albums + tracks)[:limit + len(albums)]
 
     def resolve_url(self, url: str) -> List[TrackInfo]:
         """
@@ -171,11 +184,14 @@ class SearchManager:
 
     @staticmethod
     def _deduplicate(tracks: List[TrackInfo]) -> List[TrackInfo]:
-        """Remove duplicate tracks (same artist + title, case-insensitive)."""
+        """Remove duplicates (same artist + title, case-insensitive).  Albums
+        and tracks are kept in separate namespaces so an album doesn't dedup
+        against a single track of the same name."""
         seen: set[str] = set()
         unique: List[TrackInfo] = []
         for track in tracks:
-            key = f"{track.artist_str.lower()}|{track.title.lower()}"
+            tag = "alb" if getattr(track, "is_album", False) else "trk"
+            key = f"{tag}|{track.artist_str.lower()}|{track.title.lower()}"
             if key not in seen:
                 seen.add(key)
                 unique.append(track)

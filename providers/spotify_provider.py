@@ -113,6 +113,35 @@ class SpotifyProvider(MusicProvider):
             log.error(f"[Spotify] Error en búsqueda: {exc}")
             return []
 
+    def search_albums(self, query: str, limit: int = 10) -> List[TrackInfo]:
+        """Search albums.  The album URL resolves to all tracks via
+        :meth:`get_tracks_from_url`."""
+        if not self._available:
+            return []
+        try:
+            results = self._sp.search(q=query, type="album", limit=min(limit, 50))
+            albums  = (results or {}).get("albums", {}).get("items", [])
+        except Exception as exc:
+            log.error(f"[Spotify] Error en búsqueda de álbumes: {exc}")
+            return []
+        out: List[TrackInfo] = []
+        for al in albums:
+            if not al or not al.get("id"):
+                continue
+            images = al.get("images") or []
+            out.append(TrackInfo(
+                title        = al.get("name", "Unknown"),
+                artists      = [a["name"] for a in al.get("artists", []) if a.get("name")] or ["Unknown"],
+                album        = al.get("name", ""),
+                year         = (al.get("release_date") or "")[:4],
+                cover_url    = images[0]["url"] if images else "",
+                source_url   = (al.get("external_urls") or {}).get("spotify", ""),
+                platform     = "spotify",
+                is_album     = True,
+                track_count  = al.get("total_tracks", 0) or 0,
+            ))
+        return out
+
     def get_track(self, url_or_id: str) -> Optional[TrackInfo]:
         if not self._available:
             return None

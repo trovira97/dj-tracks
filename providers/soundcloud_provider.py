@@ -150,6 +150,34 @@ class SoundCloudProvider(MusicProvider):
             log.error(f"[SoundCloud] Error en búsqueda: {exc}")
             return []
 
+    def search_albums(self, query: str, limit: int = 10) -> List[TrackInfo]:
+        """Search SoundCloud sets/playlists.  The set URL resolves to all its
+        tracks via :meth:`get_tracks_from_url`."""
+        try:
+            data  = self._api("/search/playlists", {"q": query, "limit": limit})
+            items = (data or {}).get("collection", [])
+        except Exception as exc:
+            log.error(f"[SoundCloud] Error en búsqueda de álbumes: {exc}")
+            return []
+        out: List[TrackInfo] = []
+        for pl in items[:limit]:
+            if not isinstance(pl, dict):
+                continue
+            user   = pl.get("user") or {}
+            artist = (user.get("username") if isinstance(user, dict) else None) or "Unknown"
+            artwork = (pl.get("artwork_url") or "").replace("-large", "-t500x500")
+            out.append(TrackInfo(
+                title       = pl.get("title") or "Unknown",
+                artists     = [artist],
+                album       = pl.get("title") or "",
+                cover_url   = artwork,
+                source_url  = pl.get("permalink_url") or "",
+                platform    = "soundcloud",
+                is_album    = True,
+                track_count = pl.get("track_count", 0) or 0,
+            ))
+        return out
+
     def get_track(self, url_or_id: str) -> Optional[TrackInfo]:
         try:
             if url_or_id.startswith("http"):

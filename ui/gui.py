@@ -509,26 +509,47 @@ class _TrackContextMenuMixin:
 
 
 class TrackRow(ctk.CTkFrame, _TrackContextMenuMixin):
-    """Horizontal list row for search results."""
+    """Horizontal list row for search results.  Supports a multi-select
+    checkbox and a distinct look for whole-album results."""
 
-    def __init__(self, parent, track: TrackInfo, on_add: Callable, **kw):
+    def __init__(self, parent, track: TrackInfo, on_add: Callable,
+                 on_toggle: Optional[Callable] = None, **kw):
         super().__init__(parent, fg_color=C["card"], corner_radius=6, **kw)
-        self._track  = track
-        self._on_add = on_add
-        self._added  = False
+        self._track   = track
+        self._on_add  = on_add
+        self._on_toggle = on_toggle
+        self._added   = False
+        self._sel_var = ctk.BooleanVar(value=False)
         self._build()
         self.bind("<Enter>", lambda _: self.configure(fg_color=C["card_hover"]) if not self._added else None)
         self.bind("<Leave>", lambda _: self.configure(fg_color=C["card"])       if not self._added else None)
         self.bind("<Button-3>", lambda e, t=track: self._show_track_menu(e, t))
 
+    @property
+    def selected(self) -> bool:
+        return self._sel_var.get()
+
+    @property
+    def track(self) -> TrackInfo:
+        return self._track
+
     def _build(self) -> None:
         t  = self._track
+        is_album = getattr(t, "is_album", False)
         pc = PLATFORM_COLORS.get(t.platform, C["text_dim"])
 
         ctk.CTkFrame(self, width=3, fg_color=pc, corner_radius=0).pack(side="left", fill="y")
 
+        # Multi-select checkbox.
+        chk = ctk.CTkCheckBox(self, text="", width=24, variable=self._sel_var,
+                              checkbox_width=18, checkbox_height=18,
+                              fg_color=C["accent"], hover_color=C["accent_dim"],
+                              border_color=C["border_focus"], corner_radius=4,
+                              command=self._toggle)
+        chk.pack(side="left", padx=(8, 0))
+
         self._cover = ctk.CTkLabel(self, text="", width=56, height=56)
-        self._cover.pack(side="left", padx=(10, 12), pady=10)
+        self._cover.pack(side="left", padx=(8, 12), pady=10)
         _load_cover_async(self, self._cover, t.cover_url, 56)
 
         right = ctk.CTkFrame(self, fg_color="transparent", width=120)
@@ -548,7 +569,8 @@ class TrackRow(ctk.CTkFrame, _TrackContextMenuMixin):
 
         top = ctk.CTkFrame(info, fg_color="transparent")
         top.pack(fill="x")
-        ctk.CTkLabel(top, text=t.title or "Unknown", font=_font(13, "bold"),
+        title_text = (f"💿  {t.title}" if is_album else (t.title or "Unknown"))
+        ctk.CTkLabel(top, text=title_text, font=_font(13, "bold"),
                      text_color=C["text"], anchor="w").pack(side="left")
         if t.year:
             ctk.CTkLabel(top, text=f"  {t.year}", font=_font(10),
@@ -559,11 +581,20 @@ class TrackRow(ctk.CTkFrame, _TrackContextMenuMixin):
 
         bot = ctk.CTkFrame(info, fg_color="transparent")
         bot.pack(fill="x", pady=(3, 0))
-        if t.album:
+        if is_album:
+            cnt = f"ÁLBUM · {t.track_count} pistas" if t.track_count else "ÁLBUM"
+            ctk.CTkLabel(bot, text=cnt, font=_font(9, "bold"),
+                         text_color=C["warning"], anchor="w").pack(side="left")
+        elif t.album:
             ctk.CTkLabel(bot, text=t.album, font=_font(10),
                          text_color=C["text_dim"], anchor="w").pack(side="left")
-        ctk.CTkLabel(bot, text=t.duration_str, font=_font(10, mono=True),
-                     text_color=C["text_dim"]).pack(side="right")
+        if not is_album:
+            ctk.CTkLabel(bot, text=t.duration_str, font=_font(10, mono=True),
+                         text_color=C["text_dim"]).pack(side="right")
+
+    def _toggle(self) -> None:
+        if self._on_toggle:
+            self._on_toggle(self)
 
     def _add(self) -> None:
         if self._added:
@@ -585,14 +616,17 @@ class TrackCard(ctk.CTkFrame, _TrackContextMenuMixin):
     _CARD_W = 185
     _CARD_H = 275
 
-    def __init__(self, parent, track: TrackInfo, on_add: Callable, **kw):
+    def __init__(self, parent, track: TrackInfo, on_add: Callable,
+                 on_toggle: Optional[Callable] = None, **kw):
         super().__init__(parent, fg_color=C["card"], corner_radius=8,
                          width=self._CARD_W, height=self._CARD_H,
                          border_width=1, border_color=C["card"], **kw)
         self.grid_propagate(False)
-        self._track  = track
-        self._on_add = on_add
-        self._added  = False
+        self._track   = track
+        self._on_add  = on_add
+        self._on_toggle = on_toggle
+        self._added   = False
+        self._sel_var = ctk.BooleanVar(value=False)
         self._build()
         self.bind("<Button-3>", lambda e, t=track: self._show_track_menu(e, t))
         # Hover: lift the card with a coloured border + subtle bg change.
@@ -632,20 +666,37 @@ class TrackCard(ctk.CTkFrame, _TrackContextMenuMixin):
 
     def _build(self) -> None:
         t  = self._track
+        is_album = getattr(t, "is_album", False)
         pc = PLATFORM_COLORS.get(t.platform, C["text_dim"])
 
-        ctk.CTkFrame(self, height=3, fg_color=pc, corner_radius=0).pack(fill="x")
+        head = ctk.CTkFrame(self, height=3, fg_color=pc, corner_radius=0)
+        head.pack(fill="x")
+
+        # Multi-select checkbox overlaid top-left.
+        self._chk = ctk.CTkCheckBox(self, text="", width=22, variable=self._sel_var,
+                                    checkbox_width=18, checkbox_height=18,
+                                    fg_color=C["accent"], hover_color=C["accent_dim"],
+                                    border_color=C["border_focus"], corner_radius=4,
+                                    command=self._toggle)
+        self._chk.place(x=8, y=8)
 
         self._cover = ctk.CTkLabel(self, text="", width=155, height=155)
         self._cover.pack(padx=15, pady=(10, 6))
         _load_cover_async(self, self._cover, t.cover_url, 155)
 
-        ctk.CTkLabel(self, text=t.title or "Unknown", font=_font(12, "bold"),
+        title_text = (f"💿 {t.title}" if is_album else (t.title or "Unknown"))
+        ctk.CTkLabel(self, text=title_text, font=_font(12, "bold"),
                      text_color=C["text"], anchor="w", wraplength=161,
                      justify="left").pack(fill="x", padx=12)
 
-        sub = f"{t.artist_str or '—'}" + (f"  ·  {t.year}" if t.year else "")
-        ctk.CTkLabel(self, text=sub, font=_font(10), text_color=C["text_mid"],
+        if is_album:
+            sub = f"{t.artist_str or '—'}  ·  " + (
+                f"{t.track_count} pistas" if t.track_count else "álbum")
+            sub_color = C["warning"]
+        else:
+            sub = f"{t.artist_str or '—'}" + (f"  ·  {t.year}" if t.year else "")
+            sub_color = C["text_mid"]
+        ctk.CTkLabel(self, text=sub, font=_font(10), text_color=sub_color,
                      anchor="w", wraplength=161,
                      justify="left").pack(fill="x", padx=12, pady=(2, 0))
 
@@ -658,8 +709,21 @@ class TrackCard(ctk.CTkFrame, _TrackContextMenuMixin):
                                    hover_color=C["accent_dim"], text_color="#000",
                                    corner_radius=5, command=self._add)
         self._btn.pack(side="right")
-        ctk.CTkLabel(bot, text=t.duration_str, font=_font(9, mono=True),
-                     text_color=C["text_dim"]).pack(side="right", padx=(0, 6))
+        if not is_album:
+            ctk.CTkLabel(bot, text=t.duration_str, font=_font(9, mono=True),
+                         text_color=C["text_dim"]).pack(side="right", padx=(0, 6))
+
+    def _toggle(self) -> None:
+        if self._on_toggle:
+            self._on_toggle(self)
+
+    @property
+    def selected(self) -> bool:
+        return self._sel_var.get()
+
+    @property
+    def track(self) -> TrackInfo:
+        return self._track
 
     def _add(self) -> None:
         if self._added:
@@ -1091,7 +1155,16 @@ class SearchPanel(ctk.CTkFrame):
             self, fg_color="transparent",
             scrollbar_button_color=C["border"],
             scrollbar_button_hover_color=C["border_focus"])
-        self._results_frame.pack(fill="both", expand=True, padx=20, pady=(4, 20))
+        self._results_frame.pack(fill="both", expand=True, padx=20, pady=(4, 0))
+
+        # Bottom selection bar — hidden until a result checkbox is ticked.
+        self._sel_bar = ctk.CTkFrame(self, fg_color="transparent")
+        self._sel_btn = ctk.CTkButton(
+            self._sel_bar, text="⬇  Descargar seleccionados",
+            height=40, font=_font(13, "bold"),
+            fg_color=C["accent"], hover_color=C["accent_dim"],
+            text_color="#000", corner_radius=8, command=self._download_selected)
+        self._sel_btn.pack(fill="x")
 
         self._empty_lbl = ctk.CTkLabel(
             self._results_frame, text="",
@@ -1283,9 +1356,12 @@ class SearchPanel(ctk.CTkFrame):
             if counts.get(plat, 0):
                 parts.append(f"{sym} {counts[plat]}")
         breakdown = "  ·  " + "  ".join(parts) if parts else ""
+        n_alb = sum(1 for t in results if getattr(t, "is_album", False))
+        alb_txt = f"  ·  💿 {n_alb} álbum{'es' if n_alb != 1 else ''}" if n_alb else ""
         n = len(results)
         self._status_lbl.configure(
-            text=f"{n} resultado{'s' if n != 1 else ''}{breakdown}  —  + para añadir",
+            text=f"{n} resultado{'s' if n != 1 else ''}{breakdown}{alb_txt}"
+                 "  —  ＋ añadir · ☑ marca varias",
             text_color=C["success"])
 
         BATCH     = 20
@@ -1303,17 +1379,44 @@ class SearchPanel(ctk.CTkFrame):
             for i, track in enumerate(batch):
                 idx = offset + i
                 if grid_mode:
-                    card = TrackCard(self._results_frame, track, on_add=self._add_track)
+                    card = TrackCard(self._results_frame, track, on_add=self._add_track,
+                                     on_toggle=self._on_toggle)
                     card.grid(row=idx // cols, column=idx % cols, padx=4, pady=4, sticky="n")
                     self._results.append(card)
                 else:
-                    row = TrackRow(self._results_frame, track, on_add=self._add_track)
+                    row = TrackRow(self._results_frame, track, on_add=self._add_track,
+                                   on_toggle=self._on_toggle)
                     row.pack(fill="x", pady=(0, 3))
                     self._results.append(row)
             if offset + BATCH < len(results):
                 self.after(10, lambda: _render(offset + BATCH))
 
         _render(0)
+
+    def _on_toggle(self, widget) -> None:
+        """Refresh the bottom selection bar whenever a checkbox toggles."""
+        n = sum(1 for w in self._results if getattr(w, "selected", False))
+        if n:
+            self._sel_btn.configure(
+                text=f"⬇  Descargar seleccionados ({n})",
+                fg_color=C["accent"], text_color="#000", state="normal")
+            self._sel_bar.pack(fill="x", padx=20, pady=(0, 14))
+        else:
+            self._sel_bar.pack_forget()
+
+    def _download_selected(self) -> None:
+        chosen = [w.track for w in self._results if getattr(w, "selected", False)]
+        if not chosen:
+            return
+        for w in self._results:
+            if getattr(w, "selected", False):
+                w.flash()
+        # Enqueue in the background (albums expand into many tracks).
+        threading.Thread(target=lambda: [self._on_add_track(t) for t in chosen],
+                         daemon=True).start()
+        self._status_lbl.configure(
+            text=f"Añadiendo {len(chosen)} selección(es) a la cola…",
+            text_color=C["accent"])
 
     def _rerender(self) -> None:
         if self._last_results:
@@ -1332,6 +1435,8 @@ class SearchPanel(ctk.CTkFrame):
             if w is not self._empty_lbl:
                 w.destroy()
         self._results.clear()
+        if hasattr(self, "_sel_bar"):
+            self._sel_bar.pack_forget()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2387,9 +2492,18 @@ class DjTracksDwCrackApp:
             self._root.title(self.APP_TITLE)
 
     def _on_add_track(self, track: TrackInfo) -> None:
-        self._ctrl.add_to_queue(track)
+        # enqueue_result expands albums/sets into all their tracks; single
+        # tracks enqueue as-is. Runs on whatever thread called us (the search
+        # panel already backgrounds multi-select adds).
+        n = self._ctrl.enqueue_result(track)
         name = f"{track.artist_str} — {track.title}"
-        self._toast(f"Añadido: {name[:60]}")
+        if getattr(track, "is_album", False):
+            self._root.after(0, lambda: self._toast(
+                f"💿 Álbum: {n} pista{'s' if n != 1 else ''} en cola" if n
+                else f"No se pudo expandir el álbum «{track.title[:40]}»",
+                "success" if n else "error"))
+        else:
+            self._root.after(0, lambda: self._toast(f"Añadido: {name[:60]}"))
 
     # ── Task completion side-effects (toggleable from Settings) ───────────────
 

@@ -53,6 +53,8 @@ class TrackInfo:
     track_number: int               = 0     # 0 = unknown
     disc_number:  int               = 0     # 0 = unknown
     total_tracks: int               = 0     # 0 = unknown
+    is_album:     bool              = False  # True when this result is a whole album/set
+    track_count:  int               = 0     # number of tracks (albums only; 0 = unknown)
     extra:        Dict[str, Any]    = field(default_factory=dict)
 
     @property

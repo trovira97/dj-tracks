@@ -206,6 +206,39 @@ class AppController:
         log.info(f"[Controller] Añadido a cola: {task.display_name}")
         return task
 
+    def add_album_to_queue(self, album: TrackInfo) -> int:
+        """
+        Expand an album/set result into its individual tracks and enqueue
+        each one.  Resolves the album's ``source_url`` via the matching
+        provider (Spotify album, Apple album, SoundCloud set, Bandcamp album).
+
+        Returns:
+            The number of tracks enqueued.
+        """
+        tracks: List[TrackInfo] = []
+        if album.source_url:
+            try:
+                tracks = self.search_manager.resolve_url(album.source_url)
+            except Exception as exc:
+                log.error(f"[Controller] No se pudo expandir el álbum «{album.title}»: {exc}")
+        # Filter out any album/placeholder entries the resolver might return.
+        tracks = [t for t in tracks if t and not getattr(t, "is_album", False)]
+        if not tracks:
+            log.warning(f"[Controller] Álbum «{album.title}» sin pistas resolubles")
+            return 0
+        for t in tracks:
+            self.add_to_queue(t)
+        log.info(f"[Controller] Álbum «{album.title}»: {len(tracks)} pistas en cola")
+        return len(tracks)
+
+    def enqueue_result(self, result: TrackInfo) -> int:
+        """Enqueue one search result: a whole album if ``is_album``, else a
+        single track.  Returns the number of tasks added."""
+        if getattr(result, "is_album", False):
+            return self.add_album_to_queue(result)
+        self.add_to_queue(result)
+        return 1
+
     def remove_from_queue(self, task: DownloadTask) -> None:
         """
         Cancel *task* and remove it from the active queue.

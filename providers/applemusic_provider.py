@@ -82,7 +82,7 @@ class AppleMusicProvider(MusicProvider):
         try:
             r = self._session.get(
                 self.ITUNES_SEARCH,
-                params={"term": query, "media": "music", "limit": limit},
+                params={"term": query, "media": "music", "entity": "song", "limit": limit},
                 timeout=10,
             )
             r.raise_for_status()
@@ -92,6 +92,39 @@ class AppleMusicProvider(MusicProvider):
         except Exception as e:
             log.error(f"[AppleMusic] Error en búsqueda: {e}")
             return []
+
+    def search_albums(self, query: str, limit: int = 10) -> List[TrackInfo]:
+        """Search albums.  The album's collectionViewUrl resolves to all its
+        tracks via :meth:`get_tracks_from_url`."""
+        try:
+            r = self._session.get(
+                self.ITUNES_SEARCH,
+                params={"term": query, "media": "music", "entity": "album", "limit": limit},
+                timeout=10,
+            )
+            r.raise_for_status()
+            items = r.json().get("results", [])
+        except Exception as e:
+            log.error(f"[AppleMusic] Error en búsqueda de álbumes: {e}")
+            return []
+        out: List[TrackInfo] = []
+        for it in items:
+            if it.get("wrapperType") != "collection":
+                continue
+            art = (it.get("artworkUrl100", "")
+                   .replace("100x100bb", "1200x1200bb").replace("100x100", "1200x1200bb"))
+            out.append(TrackInfo(
+                title        = it.get("collectionName", ""),
+                artists      = [it.get("artistName", "Unknown")],
+                album        = it.get("collectionName", ""),
+                year         = (it.get("releaseDate") or "")[:4],
+                cover_url    = art,
+                source_url   = it.get("collectionViewUrl", ""),
+                platform     = "applemusic",
+                is_album     = True,
+                track_count  = it.get("trackCount", 0) or 0,
+            ))
+        return out
 
     def get_track(self, url_or_id: str) -> Optional[TrackInfo]:
         try:
