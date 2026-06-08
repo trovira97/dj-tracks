@@ -26,3 +26,8 @@ platformdirs>=4.0.0
 # ── Optional UX features (gracefully degraded if missing) ─────────────────────
 tkinterdnd2>=0.4.0       # drag-and-drop URLs onto the search bar
 qrcode[pil]>=7.4.0       # QR codes in the donation dialog
+
+# ── DJ metadata enrichment (BPM / key / Camelot) ──────────────────────────────
+rapidfuzz>=3.0.0         # better GetSongBPM title matching (has a fallback)
+# librosa>=0.10.0        # OPTIONAL local BPM/key analysis — heavy (~numpy/scipy);
+# numpy>=1.24.0          # install manually only if you want offline DJ analysis.

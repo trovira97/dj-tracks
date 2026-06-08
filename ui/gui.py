@@ -1803,6 +1803,42 @@ class SettingsPanel(ctk.CTkFrame):
                          "Pitido del sistema cuando termina cada descarga",
                          self._sound_var)
 
+        # ── DJ · Metadatos avanzados ──────────────────────────────────────────
+        SectionLabel(scroll, "DJ · Análisis avanzado").pack(anchor="w", pady=(16, 8))
+        dj_card = self._card(scroll)
+
+        self._dj_enrich_var   = ctk.BooleanVar(value=self._ctrl.get_config("dj_enrich", False))
+        self._dj_local_var    = ctk.BooleanVar(value=self._ctrl.get_config("dj_local_fallback", False))
+        self._dj_filename_var  = ctk.BooleanVar(value=self._ctrl.get_config("dj_filename", False))
+        self._dj_replaygain_var = ctk.BooleanVar(value=self._ctrl.get_config("dj_replaygain", False))
+        self._dj_quality_var   = ctk.BooleanVar(value=self._ctrl.get_config("dj_quality_check", False))
+
+        self._switch_row(dj_card, "Análisis DJ (BPM · Tonalidad · Camelot)",
+                         "Escribe BPM, clave musical y código Camelot en cada archivo (mezcla armónica)",
+                         self._dj_enrich_var)
+
+        self._field_lbl(dj_card, "GetSongBPM · API Key  (gratis en getsongbpm.com/api)")
+        self._dj_key_var = ctk.StringVar(value=self._ctrl.get_config("dj_getsongbpm_key", ""))
+        ctk.CTkEntry(dj_card, textvariable=self._dj_key_var,
+                     placeholder_text="Opcional — BPM/clave reales de la base de datos",
+                     font=_font(11), fg_color=C["surface"],
+                     border_color=C["border"], border_width=1,
+                     text_color=C["text"], height=34).pack(fill="x", padx=14, pady=(0, 12))
+
+        Divider(dj_card).pack(fill="x", padx=14, pady=2)
+        self._switch_row(dj_card, "Análisis local (librosa)",
+                         "Si no hay API key o no se encuentra: analiza el audio localmente (más lento, requiere librosa)",
+                         self._dj_local_var)
+        self._switch_row(dj_card, "Renombrar archivo DJ  [BPM - Camelot]",
+                         "Ej.: «Artist - Title [128 - 8A].mp3»",
+                         self._dj_filename_var)
+        self._switch_row(dj_card, "ReplayGain (normalizar volumen)",
+                         "Mide la sonoridad y escribe etiquetas de ganancia para reproducción uniforme",
+                         self._dj_replaygain_var)
+        self._switch_row(dj_card, "Avisar si la calidad real es baja",
+                         "Detecta cuando un «320 kbps» es en realidad un re-encode de baja calidad",
+                         self._dj_quality_var)
+
         # ── API Credentials ───────────────────────────────────────────────────
         SectionLabel(scroll, "Credenciales de API").pack(anchor="w", pady=(16, 8))
         api_card = self._card(scroll)
@@ -2010,6 +2046,12 @@ class SettingsPanel(ctk.CTkFrame):
             "native_notify_on_complete": self._native_notify_var.get(),
             "open_folder_on_complete":   self._open_folder_var.get(),
             "sound_on_complete":         self._sound_var.get(),
+            "dj_enrich":          self._dj_enrich_var.get(),
+            "dj_getsongbpm_key":  self._dj_key_var.get().strip(),
+            "dj_local_fallback":  self._dj_local_var.get(),
+            "dj_filename":        self._dj_filename_var.get(),
+            "dj_replaygain":      self._dj_replaygain_var.get(),
+            "dj_quality_check":   self._dj_quality_var.get(),
             "spotify":    {"client_id": self._sp_id_var.get(),
                            "client_secret": self._sp_secret_var.get()},
             "soundcloud": {"client_id": self._sc_id_var.get()},

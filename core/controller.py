@@ -265,12 +265,19 @@ class AppController:
             and task.track.platform not in direct_platforms
         )
 
-        if should_post:
+        # DJ enrichment (BPM / key / Camelot / ReplayGain) applies to EVERY
+        # platform — it's independent of where the audio came from.
+        dj_enabled = success and task.output_path and self._config.get("dj_enrich", False)
+
+        if should_post or dj_enabled:
             # download() already set DONE; switch to PROCESSING for the metadata
             # pass, then restore DONE so the task reaches a terminal state.
             task.status = DownloadStatus.PROCESSING
             self._notify(task)
-            self._post_process(task)
+            if should_post:
+                self._post_process(task)
+            if dj_enabled:
+                self._dj_enrich(task)
             task.status   = DownloadStatus.DONE
             task.progress = 100.0
 
@@ -289,6 +296,55 @@ class AppController:
                 log.info(f"[Controller] Metadatos corregidos en {path.name}: {corrections}")
         except Exception as exc:
             log.error(f"[Controller] Error en post-proceso: {exc}")
+
+    def _dj_enrich(self, task: DownloadTask) -> None:
+        """
+        DJ-grade enrichment: real BPM, musical key + Camelot code, genre,
+        optional ReplayGain, optional low-quality flag, and optional
+        ``Track [BPM - Camelot]`` filename — via metadata.dj_metadata.
+
+        Gated entirely by config (``dj_enrich``); a no-op when disabled.
+        """
+        try:
+            from metadata import dj_metadata
+        except Exception as exc:
+            log.error(f"[Controller] dj_metadata no disponible: {exc}")
+            return
+
+        track = task.track
+        fmt   = task.profile.format.value
+        entry = {
+            "path":         str(task.output_path),
+            "artist":       track.artist_str,
+            "title":        track.title,
+            "genre":        track.genre,
+            "cover_url":    track.cover_url,
+            "year":         track.year,
+            "track_number": track.track_number,
+            "tracks_count": track.total_tracks,
+        }
+        ffmpeg = getattr(self.downloader, "_ffmpeg_path", None) or "ffmpeg"
+        try:
+            result = dj_metadata.enrich_files(
+                [entry], fmt,
+                api_key            = self._config.get("dj_getsongbpm_key", ""),
+                use_local_fallback = self._config.get("dj_local_fallback", False),
+                requested_quality  = self._config.get("preferred_quality", "320k"),
+                check_quality      = self._config.get("dj_quality_check", False),
+                embed_covers       = False,   # cover already embedded in metadata pass
+                dj_filename        = self._config.get("dj_filename", False),
+                replaygain         = self._config.get("dj_replaygain", False),
+                ffmpeg             = ffmpeg,
+                log                = lambda m, k="info": log.info(f"[DJ] {m.strip()}"),
+            )
+            # If the DJ-filename option renamed the file, follow the new path.
+            renames = result.get("renames", {})
+            new_path = renames.get(str(task.output_path))
+            if new_path:
+                task.output_path = Path(new_path)
+            log.info(f"[Controller] DJ enrich: {result.get('tagged', 0)} etiquetado(s)")
+        except Exception as exc:
+            log.error(f"[Controller] Error en enriquecimiento DJ: {exc}")
 
     def shutdown(self) -> None:
         """
