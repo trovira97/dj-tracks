@@ -836,14 +836,19 @@ class HistoryRow(ctk.CTkFrame):
     """One row in the history panel table.
 
     - Double-click → opens the file in the system file manager.
-    - Right-click  → context menu (open file, open folder, copy path).
+    - Right-click  → context menu (open file, open folder, copy path, redownload).
+    - ↻ button     → re-downloads the track (handy after errors or to refresh).
     - ✕ button     → removes this record from the history.
     """
 
-    def __init__(self, parent, record, on_delete: Optional[Callable] = None, **kw):
+    def __init__(self, parent, record,
+                 on_delete:     Optional[Callable] = None,
+                 on_redownload: Optional[Callable] = None,
+                 **kw):
         super().__init__(parent, fg_color=C["card"], corner_radius=5, **kw)
-        self._record    = record
-        self._on_delete = on_delete
+        self._record        = record
+        self._on_delete     = on_delete
+        self._on_redownload = on_redownload
         r  = record
         ok = r.status == "done"
         pc = PLATFORM_COLORS.get(r.platform, C["text_dim"])
@@ -871,6 +876,17 @@ class HistoryRow(ctk.CTkFrame):
         )
         self._del_btn.pack(side="right", padx=(0, 8))
 
+        # Redownload button — emphasised in red for failed entries, subtle for
+        # successful ones (useful for "I want a fresh copy" without errors too).
+        rd_color = C["error"] if not ok else C["accent"]
+        self._rd_btn = ctk.CTkButton(
+            self, text="↻", width=28, height=28, font=_font(13, "bold"),
+            fg_color="transparent", hover_color=C["surface"],
+            text_color=rd_color, corner_radius=5,
+            command=self._handle_redownload,
+        )
+        self._rd_btn.pack(side="right", padx=(0, 2))
+
         meta = ctk.CTkFrame(self, fg_color="transparent", width=200)
         meta.pack(side="right", fill="y", padx=(0, 4))
         meta.pack_propagate(False)
@@ -882,14 +898,15 @@ class HistoryRow(ctk.CTkFrame):
                      font=_font(8, mono=True), text_color=C["text_dim"], anchor="e").pack(anchor="e")
 
         # Bind interactions on every child so clicks anywhere on the row work,
-        # but skip the delete button (it has its own action).
-        self._bind_recursive(self, "<Double-Button-1>", self._open_file, skip=self._del_btn)
-        self._bind_recursive(self, "<Button-3>",        self._show_menu, skip=self._del_btn)
+        # but skip the action buttons (they have their own commands).
+        skips = {self._del_btn, self._rd_btn}
+        self._bind_recursive(self, "<Double-Button-1>", self._open_file, skip=skips)
+        self._bind_recursive(self, "<Button-3>",        self._show_menu, skip=skips)
         self._bind_recursive(self, "<Enter>", lambda _: self.configure(fg_color=C["card_hover"]))
         self._bind_recursive(self, "<Leave>", lambda _: self.configure(fg_color=C["card"]))
 
     def _bind_recursive(self, widget, sequence: str, callback, skip=None) -> None:
-        if widget is skip:
+        if skip and (widget is skip or (isinstance(skip, set) and widget in skip)):
             return
         widget.bind(sequence, callback)
         for child in widget.winfo_children():
@@ -898,6 +915,15 @@ class HistoryRow(ctk.CTkFrame):
     def _handle_delete(self) -> None:
         if self._on_delete:
             self._on_delete(self._record)
+
+    def _handle_redownload(self) -> None:
+        if not self._on_redownload:
+            return
+        # Visual feedback: dim the button while the search/enqueue runs in
+        # the background.
+        self._rd_btn.configure(state="disabled", text="…")
+        self.after(1500, lambda: self._rd_btn.configure(state="normal", text="↻"))
+        self._on_redownload(self._record)
 
     def _open_file(self, _event=None) -> None:
         if self._record.path:
@@ -917,6 +943,9 @@ class HistoryRow(ctk.CTkFrame):
                          if self._record.path else None,
                          state="normal" if has_path else "disabled")
         menu.add_separator()
+        menu.add_command(label="↻  Redescargar",
+                         command=self._handle_redownload,
+                         state="normal" if self._on_redownload else "disabled")
         menu.add_command(label="Copiar ruta",
                          command=lambda: _copy_to_clipboard(self.winfo_toplevel(), self._record.path),
                          state="normal" if self._record.path else "disabled")
@@ -1587,10 +1616,12 @@ class HistoryPanel(ctk.CTkFrame):
     PAGE_SIZE = 40
 
     def __init__(self, parent, history: HistoryManager,
-                 on_dashboard_refresh: Optional[Callable] = None, **kw):
+                 on_dashboard_refresh: Optional[Callable] = None,
+                 on_redownload:        Optional[Callable] = None, **kw):
         super().__init__(parent, fg_color=C["panel"], corner_radius=0, **kw)
         self._history              = history
         self._on_dashboard_refresh = on_dashboard_refresh
+        self._on_redownload        = on_redownload
         self._page                 = 0
         self._total                = 0
         self._build()
@@ -1697,7 +1728,9 @@ class HistoryPanel(ctk.CTkFrame):
         else:
             self._empty_lbl.pack_forget()
             for rec in records:
-                HistoryRow(self._list, rec, on_delete=self._delete_record).pack(
+                HistoryRow(self._list, rec,
+                           on_delete=self._delete_record,
+                           on_redownload=self._on_redownload).pack(
                     fill="x", pady=(0, 3))
 
         pages = max(1, (total + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
@@ -2449,7 +2482,8 @@ class DjTracksDwCrackApp:
             on_task_complete=self._on_task_complete)
         self._history_panel   = HistoryPanel(
             self._content_area, history=self._history,
-            on_dashboard_refresh=lambda: self._dashboard_panel.refresh())
+            on_dashboard_refresh=lambda: self._dashboard_panel.refresh(),
+            on_redownload=self._on_history_redownload)
         self._settings_panel  = SettingsPanel(
             self._content_area, self._ctrl,
             on_save              = self._on_settings_saved,
@@ -2524,6 +2558,50 @@ class DjTracksDwCrackApp:
                 "success" if n else "error"))
         else:
             self._root.after(0, lambda: self._toast(f"Añadido: {name[:60]}"))
+
+    # ── History re-download ────────────────────────────────────────────────────
+
+    def _on_history_redownload(self, record) -> None:
+        """Re-download a track from a history record.
+
+        The record carries title, artist, album and platform but no source URL,
+        so we run a 1-result search on the original platform (falling back to
+        "auto" if that platform is unavailable) and enqueue the best match.
+        Runs in a background thread to avoid blocking the UI on the search.
+        """
+        artist = record.artist or ""
+        title  = record.title  or ""
+        if not (artist or title):
+            self._toast("Registro sin artista ni título — no se puede redescargar", "error")
+            return
+
+        query = f"{artist} - {title}".strip(" -") or title
+        self._toast(f"↻ Buscando: {title[:55]}", "info")
+
+        def _worker() -> None:
+            try:
+                results = self._ctrl.search(query, platform_str=record.platform or "auto", limit=1)
+                # Fallback to a fan-out search if the original platform is
+                # unavailable (e.g. Spotify with no credentials).
+                if not results and record.platform:
+                    results = self._ctrl.search(query, platform_str="auto", limit=1)
+            except Exception as exc:
+                self._root.after(0, lambda: self._toast(
+                    f"Error en la búsqueda: {exc}", "error"))
+                return
+
+            if not results:
+                self._root.after(0, lambda: self._toast(
+                    f"No se encontró «{title[:50]}» para redescargar", "error"))
+                return
+
+            track = results[0]
+            self._ctrl.add_to_queue(track)
+            name = f"{track.artist_str} — {track.title}"
+            self._root.after(0, lambda: self._toast(
+                f"↻ Reencolado: {name[:55]}", "success"))
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ── Task completion side-effects (toggleable from Settings) ───────────────
 
