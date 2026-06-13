@@ -1895,12 +1895,16 @@ class SettingsPanel(ctk.CTkFrame):
         # Behaviour toggles
         self._auto_fix_var      = ctk.BooleanVar(value=self._ctrl.get_config("auto_fix_metadata", True))
         self._subfolder_var     = ctk.BooleanVar(value=self._ctrl.get_config("subfolder_per_platform", False))
+        self._cross_retry_var   = ctk.BooleanVar(value=self._ctrl.get_config("cross_platform_retry", True))
         self._switch_row(dl_card, "Auto-arreglar metadatos",
                          "Corrige título / artista / álbum tras la descarga",
                          self._auto_fix_var)
         self._switch_row(dl_card, "Sub-carpeta por plataforma",
                          "Crea carpetas separadas: Spotify / Apple Music / SoundCloud",
                          self._subfolder_var)
+        self._switch_row(dl_card, "Reintentar en otra plataforma",
+                         "Si una descarga falla por DRM / restricción, busca la misma canción en otras fuentes y la encola",
+                         self._cross_retry_var)
 
         # Parallel downloads
         Divider(dl_card).pack(fill="x", padx=14, pady=2)
@@ -2281,6 +2285,7 @@ class SettingsPanel(ctk.CTkFrame):
             "folder_structure":        self._struct_var.get(),
             "auto_fix_metadata":       self._auto_fix_var.get(),
             "subfolder_per_platform":  self._subfolder_var.get(),
+            "cross_platform_retry":    self._cross_retry_var.get(),
             "threads":                 threads,
             "notify_on_complete":        self._notify_var.get(),
             "native_notify_on_complete": self._native_notify_var.get(),

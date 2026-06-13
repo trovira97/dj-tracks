@@ -633,6 +633,8 @@ class AudioDownloader:
         full detail.
         """
         low = raw.lower()
+        if "drm" in low or "drm protected" in low or "drm-protected" in low:
+            return "Audio protegido con DRM — probando en otras plataformas…"
         if "403" in low or "forbidden" in low:
             return "Acceso denegado (403) — vídeo restringido o yt-dlp desactualizado"
         if "404" in low or "not found" in low:
@@ -657,3 +659,11 @@ class AudioDownloader:
         # Fallback: keep only the last line so the row stays readable.
         last = raw.strip().splitlines()[-1] if raw.strip() else "Error desconocido"
         return last[:140]
+
+    @staticmethod
+    def is_drm_error(raw: str) -> bool:
+        """True if *raw* looks like a DRM-protected-content failure."""
+        if not raw:
+            return False
+        low = raw.lower()
+        return "drm" in low

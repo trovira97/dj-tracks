@@ -322,6 +322,76 @@ class AppController:
 
         self._notify(task)
 
+        # ── Cross-platform fallback on irrecoverable errors ──────────────────
+        # If the download failed because of a content protection issue
+        # (DRM, region-blocked, age-restricted, members-only, premium...),
+        # automatically search the same track on the other platforms and
+        # enqueue the first downloadable match.  No-op when disabled.
+        if (not success and task.status == DownloadStatus.ERROR
+                and self._config.get("cross_platform_retry", True)):
+            self._try_cross_platform_retry(task)
+
+    def _try_cross_platform_retry(self, failed_task: DownloadTask) -> None:
+        """
+        Look up the same track on platforms other than the one that failed.
+        Enqueues the first match found and logs the swap; no-op if nothing
+        downloadable is found.
+
+        Triggered automatically when a download fails with an irrecoverable
+        provider-side error (DRM, region/age/private, premium-only, etc.).
+        """
+        # Only retry once per original track — avoid loops if the alternative
+        # also fails for the same reason.
+        if getattr(failed_task, "_retried_cross_platform", False):
+            return
+        failed_task._retried_cross_platform = True   # type: ignore[attr-defined]
+
+        msg = (failed_task.error_msg or "").lower()
+        from downloader.audio_downloader import AudioDownloader
+        is_drm = AudioDownloader.is_drm_error(msg)
+        is_geo = "geo" in msg or "region" in msg
+        is_age = "edad" in msg or "age-restricted" in msg or "age restricted" in msg
+        is_priv = "privado" in msg or "private" in msg
+        is_prem = "premium" in msg or "miembros" in msg or "members" in msg
+        irrecoverable = is_drm or is_geo or is_age or is_priv or is_prem
+        if not irrecoverable:
+            return   # 403/404/network errors aren't fixed by changing platform
+
+        track       = failed_task.track
+        orig_plat   = track.platform
+        query       = f"{track.artist_str} - {track.title}".strip(" -")
+        if not query or query == "-":
+            return
+
+        log.info(f"[Controller] Reintento cross-platform por «{failed_task.error_msg}» "
+                 f"para «{query}» (origen: {orig_plat})")
+
+        try:
+            results = self.search_manager.search(
+                query, platform=Platform.UNKNOWN, limit=8, include_albums=False,
+            )
+        except Exception as exc:
+            log.warning(f"[Controller] Cross-platform search falló: {exc}")
+            return
+
+        # Filter out the platform that already failed; prefer ones with a
+        # real downloadable source_url (SoundCloud / Bandcamp / Spotify).
+        candidates = [t for t in results
+                      if t.platform != orig_plat and not getattr(t, "is_album", False)]
+        # Stable preference order: downloadable URL > platform diversity.
+        candidates.sort(key=lambda t: (
+            0 if t.source_url else 1,
+            {"bandcamp": 0, "soundcloud": 1, "spotify": 2, "applemusic": 3}.get(t.platform, 9),
+        ))
+        if not candidates:
+            log.info(f"[Controller] Sin alternativas para «{query}» en otras plataformas")
+            return
+
+        alt = candidates[0]
+        log.info(f"[Controller] Alternativa elegida: [{alt.platform}] "
+                 f"{alt.artist_str} - {alt.title}")
+        self.add_to_queue(alt)
+
     def _post_process(self, task: DownloadTask) -> None:
         """Write cover art and metadata; verify consistency after download."""
         try:

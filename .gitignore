@@ -23,6 +23,8 @@ logs/
 # Build artifacts (PyInstaller + Inno Setup output)
 dist/
 build_temp/
+build_temp_final/
+final test/
 
 # Local user configuration / credentials  ← NEVER commit these
 config/settings.json
