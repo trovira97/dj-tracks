@@ -324,8 +324,26 @@ class AudioDownloader:
             # lossless codecs, then highest bitrate, then highest sample rate.
             # This is what makes Bandcamp FLAC win over Bandcamp MP3, and YT
             # opus-160 win over m4a-128 on the same video.
+            #
+            # NOTE: acodec:opus is NOT first any more — YouTube's opus formats
+            # now require a JavaScript runtime (Deno/Node) to decode the
+            # signature, and without one every "best opus" download returns
+            # HTTP 403.  Lossless codecs still win when they exist
+            # (Bandcamp FLAC etc.); on YouTube we fall through to abr/asr
+            # which picks the best stream the chosen player_client exposes.
             "format_sort":    ["acodec:flac", "acodec:wav", "acodec:alac",
-                                "acodec:opus", "abr", "asr"],
+                                "abr", "asr"],
+            # YouTube-specific: try player clients that don't need a JS
+            # runtime first, then fall back to ones that do.  "mediaconnect"
+            # and the android clients return signed URLs that work without
+            # Deno/Node — fixes the bulk of "HTTP 403 Forbidden" errors on
+            # auto-generated "- Topic" channels (label-uploaded tracks).
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["mediaconnect", "android", "android_music",
+                                       "web_safari", "tv"],
+                }
+            },
             "outtmpl":        outtmpl,
             "noplaylist":     True,
             "quiet":          True,
