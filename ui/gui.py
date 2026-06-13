@@ -2150,11 +2150,53 @@ class SettingsPanel(ctk.CTkFrame):
         message = result.get("message", "Sin respuesta")
         title   = "yt-dlp"
         if status == "updated":
-            messagebox.showinfo(title, message, parent=self.winfo_toplevel())
+            # The new yt-dlp is on disk but the running app still has the OLD
+            # one loaded in memory — Python doesn't hot-reload C extensions.
+            # Offer to restart so the user really gets the new version.
+            wants_restart = messagebox.askyesno(
+                title,
+                message + "\n\n¿Reiniciar DJ Tracks ahora "
+                          "para activar la nueva versión?",
+                parent=self.winfo_toplevel(),
+                default="yes",
+            )
+            if wants_restart:
+                self._restart_app()
         elif status == "up-to-date":
             messagebox.showinfo(title, message, parent=self.winfo_toplevel())
         else:
             messagebox.showerror(title, message, parent=self.winfo_toplevel())
+
+    def _restart_app(self) -> None:
+        """Re-launch the current main.py in a fresh process, then quit."""
+        import os as _os
+        import subprocess as _sp
+        import sys as _sys
+        try:
+            root_dir = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+            main_py  = _os.path.join(root_dir, "main.py")
+            kwargs: dict = {}
+            if _os.name == "nt":
+                kwargs["creationflags"] = (
+                    _sp.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+                    | 0x00000008                  # DETACHED_PROCESS
+                )
+            else:
+                kwargs["start_new_session"] = True
+            _sp.Popen(
+                [_sys.executable, "-B", main_py],
+                cwd=root_dir,
+                stdout=_sp.DEVNULL, stderr=_sp.DEVNULL, stdin=_sp.DEVNULL,
+                **kwargs,
+            )
+        except Exception:
+            pass
+        finally:
+            # Close this instance — the new one is already starting.
+            try:
+                self.winfo_toplevel().destroy()
+            except Exception:
+                _os._exit(0)
 
     def _handle_donate(self) -> None:
         from ui.donations import show_donations
