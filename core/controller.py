@@ -541,6 +541,84 @@ class AppController:
             pass
         log.info(f"[Controller] Hilos de descarga: {n}")
 
+    def update_ytdlp(self) -> Dict[str, str]:
+        """
+        Check PyPI for a newer yt-dlp release; install it if there is one.
+
+        YouTube changes its protections every few months and yt-dlp ships
+        fixes very fast — keeping it fresh fixes most "HTTP 403" / "video
+        unavailable" download failures.
+
+        Returns:
+            A dict with keys ``status`` (``up-to-date`` | ``updated`` |
+            ``error``), ``current`` (installed version), ``latest``
+            (PyPI version when known), and ``message`` (human-friendly).
+        """
+        import subprocess
+        import sys
+
+        # Current version.
+        try:
+            import yt_dlp
+            current = yt_dlp.version.__version__
+        except Exception as exc:
+            return {"status": "error", "current": "?", "latest": "?",
+                    "message": f"yt-dlp no se pudo cargar: {exc}"}
+
+        # Latest version on PyPI.
+        latest = "?"
+        try:
+            import requests
+            r = requests.get("https://pypi.org/pypi/yt-dlp/json", timeout=8)
+            r.raise_for_status()
+            latest = r.json().get("info", {}).get("version", "?")
+        except Exception as exc:
+            log.warning(f"[Controller] PyPI no accesible: {exc}")
+            return {"status": "error", "current": current, "latest": "?",
+                    "message": f"No se pudo consultar PyPI: {exc}"}
+
+        # Normalise version strings before comparing.  PyPI reports
+        # ``2026.6.9`` while yt-dlp's __version__ is ``2026.06.09`` — same
+        # release, different formatting.  Strip leading zeroes from every
+        # numeric component so the comparison is on the actual numbers.
+        def _norm(v: str) -> tuple:
+            parts = []
+            for p in v.replace("-", ".").split("."):
+                try:
+                    parts.append(int(p))
+                except ValueError:
+                    parts.append(p)
+            return tuple(parts)
+
+        if _norm(current) == _norm(latest):
+            return {"status": "up-to-date", "current": current,
+                    "latest": latest,
+                    "message": f"yt-dlp ya está actualizado (v{current})"}
+
+        # Run the upgrade.  Use the same interpreter that's running us so
+        # the install lands in the right environment.
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--upgrade",
+                 "--quiet", "yt-dlp"],
+                capture_output=True, text=True, timeout=180,
+            )
+            if result.returncode != 0:
+                err = (result.stderr or result.stdout or "").strip()[:200]
+                return {"status": "error", "current": current, "latest": latest,
+                        "message": f"pip falló: {err}"}
+        except subprocess.TimeoutExpired:
+            return {"status": "error", "current": current, "latest": latest,
+                    "message": "El instalador tardó demasiado (timeout)"}
+        except Exception as exc:
+            return {"status": "error", "current": current, "latest": latest,
+                    "message": f"Error al actualizar: {exc}"}
+
+        log.info(f"[Controller] yt-dlp actualizado: {current} → {latest}")
+        return {"status": "updated", "current": current, "latest": latest,
+                "message": f"yt-dlp actualizado: v{current} → v{latest}.  "
+                           f"Reinicia DJ Tracks para usar la nueva versión."}
+
     def reset_config(self) -> None:
         """Reset configuration to defaults.  Credentials and queue are kept."""
         # Preserve credentials so the user doesn't have to re-enter them.

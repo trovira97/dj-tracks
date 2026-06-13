@@ -2020,6 +2020,13 @@ class SettingsPanel(ctk.CTkFrame):
         SectionLabel(scroll, "Mantenimiento").pack(anchor="w", pady=(0, 8))
         maint_card = self._card(scroll)
 
+        self._maint_button(
+            maint_card,
+            label="Actualizar yt-dlp",
+            hint="Arregla la mayoría de errores 403 / «vídeo no disponible» (YouTube cambia cada 2-3 meses)",
+            command=self._handle_update_ytdlp)
+        Divider(maint_card).pack(fill="x", padx=14, pady=2)
+
         cache_n = _COVER_CACHE.size()
         self._maint_button(
             maint_card,
@@ -2114,6 +2121,40 @@ class SettingsPanel(ctk.CTkFrame):
     def _handle_clear_cache(self) -> None:
         if self._on_clear_cover_cache:
             self._on_clear_cover_cache()
+
+    def _handle_update_ytdlp(self) -> None:
+        """Check PyPI and upgrade yt-dlp if a newer version is available."""
+        from tkinter import messagebox
+
+        def _worker() -> None:
+            result = self._ctrl.update_ytdlp()
+            self.after(0, lambda: self._after_update(result))
+
+        # Feedback while the network + pip call runs (can take 10-60 s).
+        self._update_dlg_active = True
+        # Quick "started" toast — no blocking dialog while we work.
+        try:
+            top = self.winfo_toplevel()
+            # Use the app's toast if available, else a small status line.
+            if hasattr(top, "_toast"):
+                top._toast("🔄 Buscando actualizaciones de yt-dlp…", "info")
+        except Exception:
+            pass
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _after_update(self, result: dict) -> None:
+        """Show the user the outcome of the yt-dlp update."""
+        from tkinter import messagebox
+        status  = result.get("status", "error")
+        message = result.get("message", "Sin respuesta")
+        title   = "yt-dlp"
+        if status == "updated":
+            messagebox.showinfo(title, message, parent=self.winfo_toplevel())
+        elif status == "up-to-date":
+            messagebox.showinfo(title, message, parent=self.winfo_toplevel())
+        else:
+            messagebox.showerror(title, message, parent=self.winfo_toplevel())
 
     def _handle_donate(self) -> None:
         from ui.donations import show_donations
