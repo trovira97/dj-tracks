@@ -595,29 +595,40 @@ class AppController:
                     "latest": latest,
                     "message": f"yt-dlp ya está actualizado (v{current})"}
 
-        # Run the upgrade.  Use the same interpreter that's running us so
-        # the install lands in the right environment.
+        # Run the upgrade in a SEPARATE Python process and detach.  Replacing
+        # yt-dlp while it's still imported in this process can corrupt the
+        # interpreter on Windows (locked .pyd files), so we hand pip off and
+        # let it finish on its own.  The user is told to restart the app.
+        import os as _os
         try:
-            result = subprocess.run(
+            # CREATE_NEW_PROCESS_GROUP + DETACHED_PROCESS so the child outlives
+            # us cleanly even if the user kills DJ Tracks before pip finishes.
+            kwargs: Dict = {}
+            if _os.name == "nt":
+                kwargs["creationflags"] = (
+                    subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+                    | 0x00000008                         # DETACHED_PROCESS
+                )
+            else:
+                kwargs["start_new_session"] = True
+
+            subprocess.Popen(
                 [sys.executable, "-m", "pip", "install", "--upgrade",
-                 "--quiet", "yt-dlp"],
-                capture_output=True, text=True, timeout=180,
+                 "--quiet", "--disable-pip-version-check", "yt-dlp"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                **kwargs,
             )
-            if result.returncode != 0:
-                err = (result.stderr or result.stdout or "").strip()[:200]
-                return {"status": "error", "current": current, "latest": latest,
-                        "message": f"pip falló: {err}"}
-        except subprocess.TimeoutExpired:
-            return {"status": "error", "current": current, "latest": latest,
-                    "message": "El instalador tardó demasiado (timeout)"}
         except Exception as exc:
             return {"status": "error", "current": current, "latest": latest,
-                    "message": f"Error al actualizar: {exc}"}
+                    "message": f"No se pudo lanzar el instalador: {exc}"}
 
-        log.info(f"[Controller] yt-dlp actualizado: {current} → {latest}")
+        log.info(f"[Controller] yt-dlp upgrade lanzado en segundo plano: "
+                 f"{current} → {latest}")
         return {"status": "updated", "current": current, "latest": latest,
-                "message": f"yt-dlp actualizado: v{current} → v{latest}.  "
-                           f"Reinicia DJ Tracks para usar la nueva versión."}
+                "message": f"Actualizando yt-dlp en segundo plano "
+                           f"(v{current} → v{latest}).\n\n"
+                           f"Cierra y vuelve a abrir DJ Tracks dentro de "
+                           f"30 segundos para usar la nueva versión."}
 
     def reset_config(self) -> None:
         """Reset configuration to defaults.  Credentials and queue are kept."""
