@@ -1906,6 +1906,33 @@ class SettingsPanel(ctk.CTkFrame):
                          "Si una descarga falla por DRM / restricción, busca la misma canción en otras fuentes y la encola",
                          self._cross_retry_var)
 
+        # Cookies-from-browser: usa la sesión iniciada del usuario para
+        # acceder a contenido que la plataforma sirve sólo a usuarios
+        # autenticados (resuelve muchos "DRM" de SoundCloud).
+        Divider(dl_card).pack(fill="x", padx=14, pady=2)
+        cookies_row = ctk.CTkFrame(dl_card, fg_color="transparent")
+        cookies_row.pack(fill="x", padx=14, pady=(8, 14))
+        ctk.CTkLabel(cookies_row, text="Cookies del navegador",
+                     font=_font(11, "bold"), text_color=C["text"]).pack(anchor="w")
+        ctk.CTkLabel(cookies_row,
+                     text="Usa tu sesión iniciada para acceder a contenido que la "
+                          "plataforma sólo sirve a usuarios autenticados (resuelve "
+                          "muchos «DRM» de SoundCloud).  Selecciona el navegador "
+                          "donde tengas la sesión.",
+                     font=_font(9), text_color=C["text_dim"],
+                     wraplength=520, justify="left").pack(anchor="w")
+        cookies_choices = ["(desactivado)", "chrome", "firefox", "edge",
+                            "brave", "opera", "chromium", "vivaldi", "safari"]
+        current = self._ctrl.get_config("cookies_browser", "") or "(desactivado)"
+        self._cookies_var = ctk.StringVar(value=current)
+        ctk.CTkOptionMenu(
+            cookies_row, values=cookies_choices, variable=self._cookies_var,
+            fg_color=C["surface"], button_color=C["border"],
+            button_hover_color=C["border_focus"],
+            dropdown_fg_color=C["card"], dropdown_hover_color=C["card_hover"],
+            font=_font(11), text_color=C["text"], width=160, height=30,
+        ).pack(anchor="w", pady=(6, 0))
+
         # Parallel downloads
         Divider(dl_card).pack(fill="x", padx=14, pady=2)
         threads_row = ctk.CTkFrame(dl_card, fg_color="transparent")
@@ -2286,6 +2313,8 @@ class SettingsPanel(ctk.CTkFrame):
             "auto_fix_metadata":       self._auto_fix_var.get(),
             "subfolder_per_platform":  self._subfolder_var.get(),
             "cross_platform_retry":    self._cross_retry_var.get(),
+            "cookies_browser":         ("" if self._cookies_var.get() == "(desactivado)"
+                                           else self._cookies_var.get()),
             "threads":                 threads,
             "notify_on_complete":        self._notify_var.get(),
             "native_notify_on_complete": self._native_notify_var.get(),

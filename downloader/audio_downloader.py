@@ -364,9 +364,20 @@ class AudioDownloader:
         if self._ffmpeg_path:
             ydl_opts["ffmpeg_location"] = str(Path(self._ffmpeg_path).parent)
 
+        # Optional browser-cookies authentication — lets yt-dlp use the
+        # user's *own* logged-in session to access tracks that the site
+        # serves only to authenticated users (a chunk of SoundCloud's
+        # "DRM-protected" set is really just login-gated content).
+        # 100 % legal: it accesses what the user themselves are entitled to
+        # while logged in — it is NOT a DRM bypass.
+        browser = self._read_cookies_browser()
+        if browser:
+            ydl_opts["cookiesfrombrowser"] = (browser,)
+
         task.status = DownloadStatus.DOWNLOADING
         self._notify(task, 5, "Iniciando descarga…")
-        log.info(f"[Downloader yt-dlp] Iniciando: {track.artist_str} — {track.title}")
+        log.info(f"[Downloader yt-dlp] Iniciando: {track.artist_str} — {track.title}"
+                 + (f"  (cookies: {browser})" if browser else ""))
 
         # Try the primary attempt; on failure, try a relaxed last-resort that
         # drops the strict format selector and accepts whatever stream the
@@ -610,6 +621,29 @@ class AudioDownloader:
         except Exception:
             pass
         return ("", "")
+
+    # Browsers yt-dlp knows how to read cookies from.
+    _COOKIE_BROWSERS = ("chrome", "firefox", "edge", "brave",
+                        "opera", "chromium", "safari", "vivaldi")
+
+    def _read_cookies_browser(self) -> str:
+        """Return the configured browser name (e.g. "chrome") for cookies-from-
+        browser auth, or "" when the feature is disabled / misconfigured.
+
+        The user picks the browser in Settings; we validate it against
+        yt-dlp's supported list to avoid passing garbage to extractor_args.
+        """
+        import json
+        try:
+            from utils.paths import config_dir
+            cfg_path = config_dir() / "settings.json"
+            if not cfg_path.exists():
+                return ""
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+            name = (data.get("cookies_browser") or "").strip().lower()
+            return name if name in self._COOKIE_BROWSERS else ""
+        except Exception:
+            return ""
 
     def cancel(self, task_id: str) -> None:
         """
