@@ -129,7 +129,12 @@ class AudioDownloader:
         # Global pause flag — when set, progress hooks block until cleared.
         self._paused = threading.Event()
         # Serialise spotdl client construction (SpotifyClient is a singleton).
-        self._spotdl_lock = threading.Lock()
+        self._spotdl_lock    = threading.Lock()
+        # Session-level kill switch: once we know spotdl can't work for this
+        # session (e.g. the user's Spotify app requires a Premium owner and
+        # gets 403 on every search), stop wasting cycles on it.
+        self._spotdl_disabled = False
+        self._spotdl_reason   = ""
 
     # ── Pause / resume ────────────────────────────────────────────────────────
 
@@ -244,7 +249,11 @@ class AudioDownloader:
             self._cancel_flags[task.task_id] = False
 
         track = task.track
-        prefer_spotdl = track.platform in self._SPOTDL_PLATFORMS
+        # Honour the session-level kill switch — once spotdl is known to be
+        # unusable in this session, every Spotify/Apple task goes straight to
+        # yt-dlp without paying the spotdl init / search / 403 round-trip.
+        prefer_spotdl = (track.platform in self._SPOTDL_PLATFORMS
+                         and not self._spotdl_disabled)
 
         if prefer_spotdl:
             ok = self._download_spotdl(task)
@@ -252,9 +261,10 @@ class AudioDownloader:
                 with self._flags_lock:
                     self._cancel_flags.pop(task.task_id, None)
                 return ok
-            log.info(f"[Downloader] spotdl falló para «{task.display_name}» — "
-                     f"intentando con yt-dlp como respaldo")
-            # Reset progress for the fallback attempt; keep cancel flag.
+            # Silent fallback — only a single info-level note; the loud
+            # warning chain comes from spotdl itself and we've already
+            # disabled it for this session if appropriate.
+            log.info(f"[Downloader] Cayendo a yt-dlp para «{task.display_name}»")
             task.error_msg = ""
             task.progress  = 0.0
 
@@ -467,6 +477,15 @@ class AudioDownloader:
         except Exception:
             pass
 
+        # Silence spotdl + spotipy's noisy stderr loggers — we surface the
+        # important failures (with classification) ourselves.
+        import logging as _logging
+        for _name in ("spotdl", "spotipy", "spotipy.client"):
+            try:
+                _logging.getLogger(_name).setLevel(_logging.ERROR)
+            except Exception:
+                pass
+
         try:
             with self._spotdl_lock:
                 client = _Spotdl(
@@ -474,7 +493,7 @@ class AudioDownloader:
                     downloader_settings=settings,
                 )
         except Exception as exc:
-            log.warning(f"[Downloader spotdl] Init falló: {exc}")
+            log.info(f"[Downloader spotdl] Init falló: {str(exc)[:120]}")
             return False
 
         # spotdl needs either a Spotify URL or a query.  Prefer the URL when
@@ -487,7 +506,28 @@ class AudioDownloader:
         try:
             songs = client.search([query])
         except Exception as exc:
-            log.warning(f"[Downloader spotdl] Search falló: {exc}")
+            msg = str(exc)
+            # Detect terminal Spotify-side failures and disable spotdl for the
+            # rest of this session so we don't spam the log on every track.
+            low = msg.lower()
+            terminal = (
+                "premium subscription" in low or
+                "403" in low and "api.spotify.com" in low or
+                "401" in low or
+                "invalid client" in low or
+                "invalid_client" in low
+            )
+            if terminal and not self._spotdl_disabled:
+                self._spotdl_disabled = True
+                self._spotdl_reason   = msg[:200]
+                log.warning(
+                    "[Downloader spotdl] Desactivado para esta sesión — la API "
+                    "de Spotify rechaza tus credenciales (probablemente la app "
+                    "de developer requiere cuenta Premium o el secret es "
+                    "inválido). Las descargas seguirán con yt-dlp."
+                )
+            else:
+                log.info(f"[Downloader spotdl] Search falló: {msg[:120]}")
             return False
         if not songs:
             log.info("[Downloader spotdl] Sin resultados — fallback")
