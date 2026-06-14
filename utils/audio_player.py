@@ -22,6 +22,18 @@ from typing import Callable, Optional
 log = logging.getLogger("dj_tracks.player")
 
 
+def _read_duration(filepath: Path) -> float:
+    """Return duration in seconds, or 0.0 if it can't be determined."""
+    try:
+        from mutagen import File as MutagenFile
+        info = MutagenFile(str(filepath))
+        if info is not None and getattr(info, "info", None) is not None:
+            return float(info.info.length or 0.0)
+    except Exception:
+        pass
+    return 0.0
+
+
 class AudioPlayer:
     """Tiny pygame-backed preview player.  Thread-safe singleton."""
 
@@ -42,6 +54,9 @@ class AudioPlayer:
         self._ready    = False           # mixer initialised?
         self._current: Optional[Path] = None
         self._paused   = False
+        self._volume   = 0.8             # 0.0 — 1.0
+        self._duration = 0.0             # seconds, 0 = unknown
+        self._start_pos = 0.0            # seek offset baked in on play(start=)
         self._on_state_change: list[Callable] = []
 
     @property
@@ -68,9 +83,9 @@ class AudioPlayer:
 
     # ── Public API ───────────────────────────────────────────────────────────
 
-    def play(self, filepath: Path) -> bool:
+    def play(self, filepath: Path, start: float = 0.0) -> bool:
         """
-        Play *filepath*.  If something else is playing, it's replaced.
+        Play *filepath* from *start* seconds.  Replaces whatever was playing.
 
         Returns:
             ``True`` if playback started, ``False`` otherwise.
@@ -85,14 +100,60 @@ class AudioPlayer:
             try:
                 import pygame
                 pygame.mixer.music.load(str(filepath))
-                pygame.mixer.music.play()
-                self._current = filepath
-                self._paused  = False
+                pygame.mixer.music.set_volume(self._volume)
+                pygame.mixer.music.play(start=max(0.0, start))
+                self._current   = filepath
+                self._paused    = False
+                self._start_pos = max(0.0, start)
+                self._duration  = _read_duration(filepath)
             except Exception as exc:
                 log.warning(f"[Player] Error al reproducir {filepath.name}: {exc}")
                 return False
         self._fire_state_change()
         return True
+
+    def seek(self, seconds: float) -> bool:
+        """Jump to *seconds* into the current track."""
+        if self._current is None:
+            return False
+        return self.play(self._current, start=seconds)
+
+    def set_volume(self, value: float) -> None:
+        """Set output volume (0.0 - 1.0)."""
+        value = max(0.0, min(1.0, value))
+        self._volume = value
+        if self._ready:
+            try:
+                import pygame
+                pygame.mixer.music.set_volume(value)
+            except Exception:
+                pass
+        self._fire_state_change()
+
+    def get_position(self) -> float:
+        """Return current playback position in seconds (best effort).
+
+        pygame returns ms since the *last* play() call, so we add the seek
+        offset baked in during the last play(start=...) call.
+        """
+        if not self._ready or self._current is None:
+            return 0.0
+        try:
+            import pygame
+            ms = pygame.mixer.music.get_pos()
+            if ms < 0:
+                return self._start_pos
+            return self._start_pos + (ms / 1000.0)
+        except Exception:
+            return 0.0
+
+    @property
+    def volume(self) -> float:
+        return self._volume
+
+    @property
+    def duration(self) -> float:
+        return self._duration
 
     def stop(self) -> None:
         """Stop playback completely."""

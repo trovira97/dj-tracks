@@ -2499,6 +2499,180 @@ class _NavItem(ctk.CTkFrame):
             self._badge.place_forget()
 
 
+class PlayerBar(ctk.CTkFrame):
+    """Persistent mini-player anchored above the status bar.
+
+    Shows: current track name · play/pause · stop · elapsed / total ·
+    seek slider · volume slider.  Hides itself when nothing has been
+    loaded yet.  Reacts to AudioPlayer state changes via subscribe().
+    """
+
+    HEIGHT = 46
+
+    def __init__(self, parent, **kw):
+        super().__init__(parent, height=self.HEIGHT, fg_color=C["panel"],
+                         corner_radius=0, **kw)
+        self.pack_propagate(False)
+        self._seeking = False     # True while the user drags the slider
+        self._tick_id: Optional[str] = None
+        self._build()
+        self._hide()
+
+        from utils.audio_player import AudioPlayer
+        AudioPlayer.get().subscribe(self._on_player_state)
+
+    # ── UI ──────────────────────────────────────────────────────────────────
+    def _build(self) -> None:
+        self._title = ctk.CTkLabel(
+            self, text="", font=_font(10, "bold"),
+            text_color=C["text"], anchor="w", width=220)
+        self._title.pack(side="left", padx=(14, 10))
+
+        self._pp_btn = ctk.CTkButton(
+            self, text="▶", width=30, height=28, font=_font(13, "bold"),
+            fg_color="transparent", hover_color=C["surface"],
+            text_color=C["accent"], corner_radius=6,
+            command=self._toggle_pause)
+        self._pp_btn.pack(side="left", padx=2)
+
+        self._stop_btn = ctk.CTkButton(
+            self, text="■", width=30, height=28, font=_font(11, "bold"),
+            fg_color="transparent", hover_color=C["surface"],
+            text_color=C["text_mid"], corner_radius=6,
+            command=self._stop)
+        self._stop_btn.pack(side="left", padx=2)
+
+        # Volume on the right
+        self._vol = ctk.CTkSlider(
+            self, from_=0, to=100, width=90, height=14,
+            command=self._on_volume)
+        self._vol.set(80)
+        self._vol.pack(side="right", padx=(6, 14))
+        ctk.CTkLabel(self, text="🔊", font=_font(10),
+                     text_color=C["text_dim"]).pack(side="right", padx=(0, 4))
+
+        # Position labels + seek slider fill the middle
+        self._elapsed = ctk.CTkLabel(self, text="0:00", font=_font(9),
+                                     text_color=C["text_dim"], width=36)
+        self._elapsed.pack(side="left", padx=(8, 4))
+
+        self._seek = ctk.CTkSlider(
+            self, from_=0, to=1000, height=14,
+            command=self._on_seek_drag)
+        self._seek.set(0)
+        self._seek.bind("<ButtonRelease-1>", self._on_seek_release)
+        self._seek.bind("<Button-1>", self._on_seek_press)
+        self._seek.pack(side="left", fill="x", expand=True, padx=4)
+
+        self._total = ctk.CTkLabel(self, text="0:00", font=_font(9),
+                                   text_color=C["text_dim"], width=36)
+        self._total.pack(side="left", padx=(4, 8))
+
+    # ── Visibility ──────────────────────────────────────────────────────────
+    def _show(self) -> None:
+        if not self.winfo_ismapped():
+            self.pack(side="bottom", fill="x")
+
+    def _hide(self) -> None:
+        if self.winfo_ismapped():
+            self.pack_forget()
+
+    # ── Actions ─────────────────────────────────────────────────────────────
+    def _toggle_pause(self) -> None:
+        from utils.audio_player import AudioPlayer
+        AudioPlayer.get().toggle_pause()
+
+    def _stop(self) -> None:
+        from utils.audio_player import AudioPlayer
+        AudioPlayer.get().stop()
+
+    def _on_volume(self, value: float) -> None:
+        from utils.audio_player import AudioPlayer
+        AudioPlayer.get().set_volume(value / 100.0)
+
+    def _on_seek_press(self, _e=None) -> None:
+        self._seeking = True
+
+    def _on_seek_drag(self, value: float) -> None:
+        # Only update the elapsed label while dragging; commit on release.
+        from utils.audio_player import AudioPlayer
+        dur = AudioPlayer.get().duration
+        if dur > 0:
+            self._elapsed.configure(text=_fmt_mmss(dur * (value / 1000.0)))
+
+    def _on_seek_release(self, _e=None) -> None:
+        from utils.audio_player import AudioPlayer
+        player = AudioPlayer.get()
+        dur = player.duration
+        if dur > 0:
+            target = dur * (self._seek.get() / 1000.0)
+            player.seek(target)
+        self._seeking = False
+
+    # ── State sync ──────────────────────────────────────────────────────────
+    def _on_player_state(self) -> None:
+        """Called by AudioPlayer on every state change.  Marshal to the
+        Tk thread because pygame may fire callbacks from any thread."""
+        try:
+            self.after(0, self._refresh)
+        except Exception:
+            pass
+
+    def _refresh(self) -> None:
+        from utils.audio_player import AudioPlayer
+        player = AudioPlayer.get()
+        if player.current is None:
+            self._hide()
+            self._stop_tick()
+            return
+        self._show()
+        self._title.configure(text=player.current.stem[:40])
+        self._pp_btn.configure(text="⏸" if not player.paused else "▶")
+        dur = player.duration
+        self._total.configure(text=_fmt_mmss(dur) if dur > 0 else "--:--")
+        self._start_tick()
+
+    # ── Progress tick ───────────────────────────────────────────────────────
+    def _start_tick(self) -> None:
+        if self._tick_id is not None:
+            return
+        self._tick_id = self.after(500, self._tick)
+
+    def _stop_tick(self) -> None:
+        if self._tick_id is not None:
+            try:
+                self.after_cancel(self._tick_id)
+            except Exception:
+                pass
+            self._tick_id = None
+
+    def _tick(self) -> None:
+        self._tick_id = None
+        from utils.audio_player import AudioPlayer
+        player = AudioPlayer.get()
+        if player.current is None:
+            return
+        pos = player.get_position()
+        dur = player.duration
+        if not self._seeking:
+            if dur > 0:
+                self._seek.set(min(1000, (pos / dur) * 1000))
+            self._elapsed.configure(text=_fmt_mmss(pos))
+        # keep ticking while playing
+        if not player.paused:
+            self._tick_id = self.after(500, self._tick)
+        else:
+            # still poll occasionally so resume/seek shows fast
+            self._tick_id = self.after(800, self._tick)
+
+
+def _fmt_mmss(seconds: float) -> str:
+    if seconds is None or seconds < 0:
+        return "0:00"
+    s = int(seconds)
+    return f"{s // 60}:{s % 60:02d}"
+
+
 class Sidebar(ctk.CTkFrame):
     _ITEMS = [
         ("dashboard", "◈", "DASHBOARD"),
@@ -2684,6 +2858,12 @@ class DjTracksDwCrackApp:
         # Status bar
         self._statusbar = ctk.CTkFrame(self._root, height=22, fg_color=C["sidebar"], corner_radius=0)
         self._statusbar.pack(side="bottom", fill="x")
+
+        # Mini player bar (sits between status bar and content; hides itself
+        # until the user presses ▶ on a history row).
+        self._player_bar = PlayerBar(self._root)
+        self._player_bar.pack(side="bottom", fill="x")
+        self._player_bar.pack_forget()
         self._statusbar.pack_propagate(False)
         ctk.CTkLabel(self._statusbar,
                      text="DJ Tracks  ·  yt-dlp  ·  Spotify  ·  Apple Music  ·  SoundCloud",
