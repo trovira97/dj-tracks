@@ -30,6 +30,7 @@ platformdirs>=4.0.0
 # ── Optional UX features (gracefully degraded if missing) ─────────────────────
 tkinterdnd2>=0.4.0       # drag-and-drop URLs onto the search bar
 qrcode[pil]>=7.4.0       # QR codes in the donation dialog
+pygame>=2.5.0            # in-app audio preview / play button
 
 # ── DJ metadata enrichment (BPM / key / Camelot) ──────────────────────────────
 rapidfuzz>=3.0.0         # better GetSongBPM title matching (has a fallback)

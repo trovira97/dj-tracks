@@ -70,6 +70,8 @@ hiddenimports += _sd_hidden
 hiddenimports += [
     "PIL._tkinter_finder",
     "PIL.ImageTk",
+    "pygame",
+    "pygame.mixer",
 ]
 
 # ── Modules to leave out (huge & unused at runtime) ───────────────────────────

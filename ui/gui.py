@@ -887,6 +887,23 @@ class HistoryRow(ctk.CTkFrame):
         )
         self._rd_btn.pack(side="right", padx=(0, 2))
 
+        # Play / pause button — only shown when the file actually exists on
+        # disk (failed downloads have a record but no path).
+        self._has_file = bool(r.path) and Path(r.path).exists() if r.path else False
+        self._pl_btn = ctk.CTkButton(
+            self, text="▶", width=28, height=28, font=_font(12, "bold"),
+            fg_color="transparent", hover_color=C["surface"],
+            text_color=C["accent"] if self._has_file else C["text_dim"],
+            corner_radius=5,
+            command=self._handle_play,
+            state="normal" if self._has_file else "disabled",
+        )
+        self._pl_btn.pack(side="right", padx=(0, 2))
+        # Subscribe to player state changes so the button icon stays in sync.
+        if self._has_file:
+            from utils.audio_player import AudioPlayer
+            AudioPlayer.get().subscribe(self._refresh_play_btn)
+
         meta = ctk.CTkFrame(self, fg_color="transparent", width=200)
         meta.pack(side="right", fill="y", padx=(0, 4))
         meta.pack_propagate(False)
@@ -899,7 +916,7 @@ class HistoryRow(ctk.CTkFrame):
 
         # Bind interactions on every child so clicks anywhere on the row work,
         # but skip the action buttons (they have their own commands).
-        skips = {self._del_btn, self._rd_btn}
+        skips = {self._del_btn, self._rd_btn, self._pl_btn}
         self._bind_recursive(self, "<Double-Button-1>", self._open_file, skip=skips)
         self._bind_recursive(self, "<Button-3>",        self._show_menu, skip=skips)
         self._bind_recursive(self, "<Enter>", lambda _: self.configure(fg_color=C["card_hover"]))
@@ -924,6 +941,40 @@ class HistoryRow(ctk.CTkFrame):
         self._rd_btn.configure(state="disabled", text="…")
         self.after(1500, lambda: self._rd_btn.configure(state="normal", text="↻"))
         self._on_redownload(self._record)
+
+    def _handle_play(self) -> None:
+        """Toggle play / pause for this row's audio file.
+
+        Pressing play on a new row stops whatever was playing before.
+        """
+        if not self._has_file:
+            return
+        from utils.audio_player import AudioPlayer
+        player = AudioPlayer.get()
+        path = Path(self._record.path)
+        # Same row toggled twice → pause/resume; new row → load + play.
+        if player.current and player.current.resolve() == path.resolve():
+            player.toggle_pause()
+        else:
+            player.play(path)
+
+    def _refresh_play_btn(self) -> None:
+        """Called by the AudioPlayer on every state change so the icon
+        reflects the actual playback state of *this* row."""
+        try:
+            if not self.winfo_exists() or not self._has_file:
+                return
+        except Exception:
+            return
+        from utils.audio_player import AudioPlayer
+        player = AudioPlayer.get()
+        path = Path(self._record.path)
+        is_mine = (player.current is not None
+                   and player.current.resolve() == path.resolve())
+        if is_mine and not player.paused:
+            self._pl_btn.configure(text="⏸", text_color=C["success"])
+        else:
+            self._pl_btn.configure(text="▶", text_color=C["accent"])
 
     def _open_file(self, _event=None) -> None:
         if self._record.path:
@@ -1176,9 +1227,24 @@ class SearchPanel(ctk.CTkFrame):
                               dropdown_fg_color=C["card"], font=_font(9),
                               text_color=C["text"], width=90, height=24).pack(side="left", padx=(0, 10))
 
-        self._status_lbl = ctk.CTkLabel(self, text="", font=_font(10),
+        # Status label + "Select all" checkbox share a single horizontal row.
+        _status_row = ctk.CTkFrame(self, fg_color="transparent")
+        _status_row.pack(fill="x", padx=20, pady=(8, 0))
+
+        self._status_lbl = ctk.CTkLabel(_status_row, text="", font=_font(10),
                                         text_color=C["text_dim"], anchor="w")
-        self._status_lbl.pack(fill="x", padx=22, pady=(8, 0))
+        self._status_lbl.pack(side="left", fill="x", expand=True, padx=(2, 0))
+
+        # Tri-state "Select all" checkbox — hidden until results are loaded.
+        self._sel_all_var = tk.BooleanVar(value=False)
+        self._sel_all_chk = ctk.CTkCheckBox(
+            _status_row, text="Seleccionar todo",
+            variable=self._sel_all_var,
+            checkbox_width=18, checkbox_height=18,
+            fg_color=C["accent"], hover_color=C["accent_dim"],
+            text_color=C["text_mid"], font=_font(10),
+            command=self._toggle_select_all)
+        # Do NOT pack here — shown only when results exist.
 
         self._results_frame = ctk.CTkScrollableFrame(
             self, fg_color="transparent",
@@ -1393,6 +1459,10 @@ class SearchPanel(ctk.CTkFrame):
                  "  —  ＋ añadir · ☑ marca varias",
             text_color=C["success"])
 
+        # Show "Select all" checkbox now that we have results.
+        self._sel_all_var.set(False)
+        self._sel_all_chk.pack(side="right", padx=(0, 2))
+
         BATCH     = 20
         grid_mode = self._view_var.get() == "Cuadrícula"
         cols      = self._get_grid_cols() if grid_mode else 1
@@ -1423,7 +1493,7 @@ class SearchPanel(ctk.CTkFrame):
         _render(0)
 
     def _on_toggle(self, widget) -> None:
-        """Refresh the bottom selection bar whenever a checkbox toggles."""
+        """Refresh the bottom selection bar and select-all checkbox whenever a checkbox toggles."""
         n = sum(1 for w in self._results if getattr(w, "selected", False))
         if n:
             self._sel_btn.configure(
@@ -1432,6 +1502,41 @@ class SearchPanel(ctk.CTkFrame):
             self._sel_bar.pack(fill="x", padx=20, pady=(0, 14))
         else:
             self._sel_bar.pack_forget()
+        self._refresh_select_all_state()
+
+    def _toggle_select_all(self) -> None:
+        """Select all / deselect all rendered results.
+
+        The checkbox var is already updated by CTk before this command fires,
+        so we read it to know the desired state: True → select all, False → deselect all.
+        Partial selection (some but not all) maps to unchecked, so clicking from
+        partial state selects all remaining items.
+        """
+        target = self._sel_all_var.get()
+        for w in self._results:
+            if hasattr(w, "_sel_var"):
+                w._sel_var.set(target)
+        # Refresh the bottom bar count without touching _sel_all_var again.
+        n = sum(1 for w in self._results if getattr(w, "selected", False))
+        if n:
+            self._sel_btn.configure(
+                text=f"⬇  Descargar seleccionados ({n})",
+                fg_color=C["accent"], text_color="#000", state="normal")
+            self._sel_bar.pack(fill="x", padx=20, pady=(0, 14))
+        else:
+            self._sel_bar.pack_forget()
+
+    def _refresh_select_all_state(self) -> None:
+        """Sync the select-all checkbox to the current per-item selection state.
+
+        Checked  → all items selected.
+        Unchecked → zero or partial selection (clicking will select all).
+        """
+        if not self._results or not hasattr(self, "_sel_all_var"):
+            return
+        n_total    = len(self._results)
+        n_selected = sum(1 for w in self._results if getattr(w, "selected", False))
+        self._sel_all_var.set(n_selected == n_total and n_total > 0)
 
     def _download_selected(self) -> None:
         chosen = [w.track for w in self._results if getattr(w, "selected", False)]
@@ -1466,6 +1571,8 @@ class SearchPanel(ctk.CTkFrame):
         self._results.clear()
         if hasattr(self, "_sel_bar"):
             self._sel_bar.pack_forget()
+        if hasattr(self, "_sel_all_chk"):
+            self._sel_all_chk.pack_forget()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
