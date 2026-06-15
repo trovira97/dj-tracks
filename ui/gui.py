@@ -844,11 +844,13 @@ class HistoryRow(ctk.CTkFrame):
     def __init__(self, parent, record,
                  on_delete:     Optional[Callable] = None,
                  on_redownload: Optional[Callable] = None,
+                 queue_paths:   Optional[list]     = None,
                  **kw):
         super().__init__(parent, fg_color=C["card"], corner_radius=5, **kw)
         self._record        = record
         self._on_delete     = on_delete
         self._on_redownload = on_redownload
+        self._queue_paths   = queue_paths or []
         r  = record
         ok = r.status == "done"
         pc = PLATFORM_COLORS.get(r.platform, C["text_dim"])
@@ -956,6 +958,11 @@ class HistoryRow(ctk.CTkFrame):
         if player.current and player.current.resolve() == path.resolve():
             player.toggle_pause()
         else:
+            # Wire up the queue so the player bar can do prev/next across
+            # the current history page.
+            if self._queue_paths:
+                player.set_queue([Path(p) for p in self._queue_paths if p],
+                                 path)
             player.play(path)
 
     def _refresh_play_btn(self) -> None:
@@ -1834,10 +1841,12 @@ class HistoryPanel(ctk.CTkFrame):
             self._empty_lbl.pack(expand=True, pady=40)
         else:
             self._empty_lbl.pack_forget()
+            page_paths = [r.path for r in records if r.path]
             for rec in records:
                 HistoryRow(self._list, rec,
                            on_delete=self._delete_record,
-                           on_redownload=self._on_redownload).pack(
+                           on_redownload=self._on_redownload,
+                           queue_paths=page_paths).pack(
                     fill="x", pady=(0, 3))
 
         pages = max(1, (total + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
@@ -2500,21 +2509,27 @@ class _NavItem(ctk.CTkFrame):
 
 
 class PlayerBar(ctk.CTkFrame):
-    """Persistent mini-player anchored above the status bar.
+    """Apple Music-style mini-player anchored above the status bar.
 
-    Shows: current track name · play/pause · stop · elapsed / total ·
-    seek slider · volume slider.  Hides itself when nothing has been
-    loaded yet.  Reacts to AudioPlayer state changes via subscribe().
+    Layout (left → right):
+        [cover 56×56] [title / artist]  ⟨◂◂  ▶/⏸  ▸▸⟩  [elapsed •━━• total]  [🔊 vol]
+
+    Hides itself when nothing has been loaded.  Reacts to AudioPlayer
+    state changes via subscribe().
     """
 
-    HEIGHT = 46
+    HEIGHT     = 78
+    COVER_SIZE = 56
 
     def __init__(self, parent, **kw):
         super().__init__(parent, height=self.HEIGHT, fg_color=C["panel"],
                          corner_radius=0, **kw)
         self.pack_propagate(False)
-        self._seeking = False     # True while the user drags the slider
+        self._seeking = False
         self._tick_id: Optional[str] = None
+        self._cover_cache_key: Optional[bytes] = None
+        self._cover_img: Optional[ctk.CTkImage] = None
+        self._placeholder_img: Optional[ctk.CTkImage] = None
         self._build()
         self._hide()
 
@@ -2523,50 +2538,96 @@ class PlayerBar(ctk.CTkFrame):
 
     # ── UI ──────────────────────────────────────────────────────────────────
     def _build(self) -> None:
-        self._title = ctk.CTkLabel(
-            self, text="", font=_font(10, "bold"),
-            text_color=C["text"], anchor="w", width=220)
-        self._title.pack(side="left", padx=(14, 10))
+        # 1-pixel top border for separation from content
+        top_border = ctk.CTkFrame(self, height=1, fg_color=C["border"], corner_radius=0)
+        top_border.pack(fill="x", side="top")
 
-        self._pp_btn = ctk.CTkButton(
-            self, text="▶", width=30, height=28, font=_font(13, "bold"),
-            fg_color="transparent", hover_color=C["surface"],
-            text_color=C["accent"], corner_radius=6,
-            command=self._toggle_pause)
-        self._pp_btn.pack(side="left", padx=2)
+        # ── Left: cover ─────────────────────────────────────────────────────
+        left = ctk.CTkFrame(self, fg_color="transparent",
+                            width=self.COVER_SIZE + 16)
+        left.pack(side="left", fill="y", padx=(12, 0))
+        left.pack_propagate(False)
+        self._cover_lbl = ctk.CTkLabel(
+            left, text="♪", font=_font(22, "bold"),
+            text_color=C["text_dim"], fg_color=C["surface"],
+            width=self.COVER_SIZE, height=self.COVER_SIZE, corner_radius=6)
+        self._cover_lbl.place(relx=0.5, rely=0.5, anchor="center")
 
-        self._stop_btn = ctk.CTkButton(
-            self, text="■", width=30, height=28, font=_font(11, "bold"),
-            fg_color="transparent", hover_color=C["surface"],
-            text_color=C["text_mid"], corner_radius=6,
-            command=self._stop)
-        self._stop_btn.pack(side="left", padx=2)
-
-        # Volume on the right
+        # ── Right: volume ───────────────────────────────────────────────────
+        right = ctk.CTkFrame(self, fg_color="transparent", width=140)
+        right.pack(side="right", fill="y", padx=(0, 14))
+        right.pack_propagate(False)
+        ctk.CTkLabel(right, text="🔊", font=_font(11),
+                     text_color=C["text_dim"]).pack(side="left", padx=(0, 6),
+                                                     pady=(0, 0))
         self._vol = ctk.CTkSlider(
-            self, from_=0, to=100, width=90, height=14,
+            right, from_=0, to=100, width=100, height=14,
             command=self._on_volume)
         self._vol.set(80)
-        self._vol.pack(side="right", padx=(6, 14))
-        ctk.CTkLabel(self, text="🔊", font=_font(10),
-                     text_color=C["text_dim"]).pack(side="right", padx=(0, 4))
+        self._vol.pack(side="left", pady=(0, 0))
 
-        # Position labels + seek slider fill the middle
-        self._elapsed = ctk.CTkLabel(self, text="0:00", font=_font(9),
-                                     text_color=C["text_dim"], width=36)
-        self._elapsed.pack(side="left", padx=(8, 4))
+        # ── Center: title + controls + seek (stacked) ───────────────────────
+        center = ctk.CTkFrame(self, fg_color="transparent")
+        center.pack(side="left", fill="both", expand=True, padx=12, pady=8)
 
+        # Row 1: title + artist on the left, transport on the right
+        row1 = ctk.CTkFrame(center, fg_color="transparent")
+        row1.pack(fill="x")
+
+        info = ctk.CTkFrame(row1, fg_color="transparent")
+        info.pack(side="left", fill="x", expand=True)
+        self._title_lbl = ctk.CTkLabel(
+            info, text="", font=_font(11, "bold"),
+            text_color=C["text"], anchor="w")
+        self._title_lbl.pack(anchor="w", fill="x")
+        self._artist_lbl = ctk.CTkLabel(
+            info, text="", font=_font(9),
+            text_color=C["text_dim"], anchor="w")
+        self._artist_lbl.pack(anchor="w", fill="x")
+
+        transport = ctk.CTkFrame(row1, fg_color="transparent")
+        transport.pack(side="right")
+        self._prev_btn = ctk.CTkButton(
+            transport, text="⏮", width=30, height=28, font=_font(14, "bold"),
+            fg_color="transparent", hover_color=C["surface"],
+            text_color=C["text_mid"], corner_radius=6,
+            command=self._prev)
+        self._prev_btn.pack(side="left", padx=2)
+        self._pp_btn = ctk.CTkButton(
+            transport, text="▶", width=36, height=32, font=_font(16, "bold"),
+            fg_color=C["accent"], hover_color=C["accent_dim"],
+            text_color=C["bg"], corner_radius=16,
+            command=self._toggle_pause)
+        self._pp_btn.pack(side="left", padx=4)
+        self._next_btn = ctk.CTkButton(
+            transport, text="⏭", width=30, height=28, font=_font(14, "bold"),
+            fg_color="transparent", hover_color=C["surface"],
+            text_color=C["text_mid"], corner_radius=6,
+            command=self._next)
+        self._next_btn.pack(side="left", padx=2)
+        self._stop_btn = ctk.CTkButton(
+            transport, text="■", width=28, height=28, font=_font(10, "bold"),
+            fg_color="transparent", hover_color=C["surface"],
+            text_color=C["text_dim"], corner_radius=6,
+            command=self._stop)
+        self._stop_btn.pack(side="left", padx=(8, 0))
+
+        # Row 2: elapsed • seek • total
+        row2 = ctk.CTkFrame(center, fg_color="transparent")
+        row2.pack(fill="x", pady=(6, 0))
+        self._elapsed = ctk.CTkLabel(row2, text="0:00", font=_font(8),
+                                     text_color=C["text_dim"], width=32)
+        self._elapsed.pack(side="left")
         self._seek = ctk.CTkSlider(
-            self, from_=0, to=1000, height=14,
+            row2, from_=0, to=1000, height=12,
             command=self._on_seek_drag)
         self._seek.set(0)
         self._seek.bind("<ButtonRelease-1>", self._on_seek_release)
         self._seek.bind("<Button-1>", self._on_seek_press)
-        self._seek.pack(side="left", fill="x", expand=True, padx=4)
-
-        self._total = ctk.CTkLabel(self, text="0:00", font=_font(9),
-                                   text_color=C["text_dim"], width=36)
-        self._total.pack(side="left", padx=(4, 8))
+        self._seek.pack(side="left", fill="x", expand=True, padx=6)
+        self._total = ctk.CTkLabel(row2, text="0:00", font=_font(8),
+                                   text_color=C["text_dim"], width=32)
+        self._total.pack(side="left")
 
     # ── Visibility ──────────────────────────────────────────────────────────
     def _show(self) -> None:
@@ -2586,6 +2647,14 @@ class PlayerBar(ctk.CTkFrame):
         from utils.audio_player import AudioPlayer
         AudioPlayer.get().stop()
 
+    def _prev(self) -> None:
+        from utils.audio_player import AudioPlayer
+        AudioPlayer.get().prev()
+
+    def _next(self) -> None:
+        from utils.audio_player import AudioPlayer
+        AudioPlayer.get().next()
+
     def _on_volume(self, value: float) -> None:
         from utils.audio_player import AudioPlayer
         AudioPlayer.get().set_volume(value / 100.0)
@@ -2594,7 +2663,6 @@ class PlayerBar(ctk.CTkFrame):
         self._seeking = True
 
     def _on_seek_drag(self, value: float) -> None:
-        # Only update the elapsed label while dragging; commit on release.
         from utils.audio_player import AudioPlayer
         dur = AudioPlayer.get().duration
         if dur > 0:
@@ -2611,8 +2679,6 @@ class PlayerBar(ctk.CTkFrame):
 
     # ── State sync ──────────────────────────────────────────────────────────
     def _on_player_state(self) -> None:
-        """Called by AudioPlayer on every state change.  Marshal to the
-        Tk thread because pygame may fire callbacks from any thread."""
         try:
             self.after(0, self._refresh)
         except Exception:
@@ -2626,11 +2692,49 @@ class PlayerBar(ctk.CTkFrame):
             self._stop_tick()
             return
         self._show()
-        self._title.configure(text=player.current.stem[:40])
+        # Title / artist (fall back to filename if tags are missing)
+        title  = player.title  or player.current.stem
+        artist = player.artist or ""
+        self._title_lbl.configure(text=title[:50])
+        self._artist_lbl.configure(text=artist[:50] or "—")
+        # Cover
+        self._refresh_cover(player.cover_bytes)
+        # Transport
         self._pp_btn.configure(text="⏸" if not player.paused else "▶")
+        self._prev_btn.configure(state="normal" if player.has_prev else "disabled")
+        self._next_btn.configure(state="normal" if player.has_next else "disabled")
+        # Volume slider stays in sync if changed programmatically
+        try:
+            self._vol.set(int(player.volume * 100))
+        except Exception:
+            pass
         dur = player.duration
         self._total.configure(text=_fmt_mmss(dur) if dur > 0 else "--:--")
         self._start_tick()
+
+    def _refresh_cover(self, data: Optional[bytes]) -> None:
+        """Update the cover image; cache by raw bytes identity so we don't
+        re-decode on every state change."""
+        if data is self._cover_cache_key and self._cover_img is not None:
+            return
+        self._cover_cache_key = data
+        if not data:
+            self._cover_img = None
+            self._cover_lbl.configure(image=None, text="♪")
+            return
+        try:
+            import io
+            from PIL import Image
+            img = Image.open(io.BytesIO(data)).convert("RGB")
+            img.thumbnail((self.COVER_SIZE * 2, self.COVER_SIZE * 2),
+                          Image.Resampling.LANCZOS)
+            self._cover_img = ctk.CTkImage(
+                light_image=img, dark_image=img,
+                size=(self.COVER_SIZE, self.COVER_SIZE))
+            self._cover_lbl.configure(image=self._cover_img, text="")
+        except Exception:
+            self._cover_img = None
+            self._cover_lbl.configure(image=None, text="♪")
 
     # ── Progress tick ───────────────────────────────────────────────────────
     def _start_tick(self) -> None:
@@ -2658,11 +2762,13 @@ class PlayerBar(ctk.CTkFrame):
             if dur > 0:
                 self._seek.set(min(1000, (pos / dur) * 1000))
             self._elapsed.configure(text=_fmt_mmss(pos))
-        # keep ticking while playing
+        # Auto-advance when the song ends
+        if (dur > 0 and pos >= dur - 0.5
+                and not player.paused and player.has_next):
+            player.next()
         if not player.paused:
             self._tick_id = self.after(500, self._tick)
         else:
-            # still poll occasionally so resume/seek shows fast
             self._tick_id = self.after(800, self._tick)
 
 

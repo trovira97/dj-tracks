@@ -34,6 +34,55 @@ def _read_duration(filepath: Path) -> float:
     return 0.0
 
 
+def _read_tags(filepath: Path) -> tuple[str, str]:
+    """Return (title, artist) from embedded tags, falling back to the
+    "Artist - Title" filename pattern used by the downloader."""
+    title, artist = "", ""
+    try:
+        from mutagen import File as MutagenFile
+        info = MutagenFile(str(filepath), easy=True)
+        if info is not None and info.tags:
+            title  = (info.tags.get("title", [""])  or [""])[0] or ""
+            artist = (info.tags.get("artist", [""]) or [""])[0] or ""
+    except Exception:
+        pass
+    if not title or not artist:
+        stem = filepath.stem
+        if " - " in stem:
+            parts = stem.split(" - ", 1)
+            artist = artist or parts[0].strip()
+            title  = title  or parts[1].strip()
+        else:
+            title = title or stem
+    return title, artist
+
+
+def _read_cover_bytes(filepath: Path) -> Optional[bytes]:
+    """Return the raw image bytes of the embedded album art, or None."""
+    try:
+        from mutagen import File as MutagenFile
+        info = MutagenFile(str(filepath))
+        if info is None:
+            return None
+        # MP3 / ID3
+        for key in (info.tags or {}):
+            if key.startswith("APIC"):
+                return info.tags[key].data
+        # MP4 / M4A
+        covers = getattr(info, "tags", None)
+        if covers and "covr" in covers:
+            data = covers["covr"]
+            if data:
+                return bytes(data[0])
+        # Vorbis (FLAC/OGG)
+        pics = getattr(info, "pictures", None)
+        if pics:
+            return pics[0].data
+    except Exception:
+        pass
+    return None
+
+
 class AudioPlayer:
     """Tiny pygame-backed preview player.  Thread-safe singleton."""
 
@@ -57,6 +106,13 @@ class AudioPlayer:
         self._volume   = 0.8             # 0.0 — 1.0
         self._duration = 0.0             # seconds, 0 = unknown
         self._start_pos = 0.0            # seek offset baked in on play(start=)
+        self._title    = ""
+        self._artist   = ""
+        self._cover_bytes: Optional[bytes] = None
+        # Queue support (for prev/next).  Filled by the UI layer with the
+        # list of history paths so the player can walk it.
+        self._queue: list[Path] = []
+        self._queue_idx: int    = -1
         self._on_state_change: list[Callable] = []
 
     @property
@@ -105,7 +161,13 @@ class AudioPlayer:
                 self._current   = filepath
                 self._paused    = False
                 self._start_pos = max(0.0, start)
-                self._duration  = _read_duration(filepath)
+                # Only re-read tags/duration/cover when the file actually
+                # changed — seek() calls play() under the hood and we don't
+                # want to re-parse the file every time the slider moves.
+                if start == 0.0:
+                    self._duration    = _read_duration(filepath)
+                    self._title, self._artist = _read_tags(filepath)
+                    self._cover_bytes = _read_cover_bytes(filepath)
             except Exception as exc:
                 log.warning(f"[Player] Error al reproducir {filepath.name}: {exc}")
                 return False
@@ -221,6 +283,64 @@ class AudioPlayer:
     @property
     def paused(self) -> bool:
         return self._paused
+
+    @property
+    def title(self) -> str:
+        return self._title
+
+    @property
+    def artist(self) -> str:
+        return self._artist
+
+    @property
+    def cover_bytes(self) -> Optional[bytes]:
+        return self._cover_bytes
+
+    # ── Queue / next / prev ─────────────────────────────────────────────────
+
+    def set_queue(self, paths: list[Path], current: Path) -> None:
+        """Replace the queue.  The current track is whichever entry equals
+        *current*; if missing, the queue is set but next/prev are no-ops."""
+        self._queue = [Path(p) for p in paths]
+        try:
+            self._queue_idx = next(
+                i for i, p in enumerate(self._queue)
+                if p.resolve() == Path(current).resolve()
+            )
+        except StopIteration:
+            self._queue_idx = -1
+
+    def next(self) -> bool:
+        if not self._queue or self._queue_idx < 0:
+            return False
+        for i in range(self._queue_idx + 1, len(self._queue)):
+            if self._queue[i].exists():
+                self._queue_idx = i
+                return self.play(self._queue[i])
+        return False
+
+    def prev(self) -> bool:
+        if not self._queue or self._queue_idx < 0:
+            return False
+        for i in range(self._queue_idx - 1, -1, -1):
+            if self._queue[i].exists():
+                self._queue_idx = i
+                return self.play(self._queue[i])
+        return False
+
+    @property
+    def has_next(self) -> bool:
+        if not self._queue or self._queue_idx < 0:
+            return False
+        return any(self._queue[i].exists()
+                   for i in range(self._queue_idx + 1, len(self._queue)))
+
+    @property
+    def has_prev(self) -> bool:
+        if not self._queue or self._queue_idx < 0:
+            return False
+        return any(self._queue[i].exists()
+                   for i in range(0, self._queue_idx))
 
     # ── Observers ────────────────────────────────────────────────────────────
 
