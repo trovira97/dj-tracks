@@ -2550,8 +2550,11 @@ class PlayerBar(ctk.CTkFrame):
         self._cover_lbl = ctk.CTkLabel(
             left, text="♪", font=_font(22, "bold"),
             text_color=C["text_dim"], fg_color=C["surface"],
-            width=self.COVER_SIZE, height=self.COVER_SIZE, corner_radius=6)
+            width=self.COVER_SIZE, height=self.COVER_SIZE, corner_radius=6,
+            cursor="hand2")
         self._cover_lbl.place(relx=0.5, rely=0.5, anchor="center")
+        self._cover_lbl.bind("<Button-1>", lambda _e: self._open_now_playing())
+        self._now_playing_win: Optional["NowPlayingWindow"] = None
 
         # ── Right: volume ───────────────────────────────────────────────────
         right = ctk.CTkFrame(self, fg_color="transparent", width=140)
@@ -2578,8 +2581,9 @@ class PlayerBar(ctk.CTkFrame):
         info.pack(side="left", fill="x", expand=True)
         self._title_lbl = ctk.CTkLabel(
             info, text="", font=_font(11, "bold"),
-            text_color=C["text"], anchor="w")
+            text_color=C["text"], anchor="w", cursor="hand2")
         self._title_lbl.pack(anchor="w", fill="x")
+        self._title_lbl.bind("<Button-1>", lambda _e: self._open_now_playing())
         self._artist_lbl = ctk.CTkLabel(
             info, text="", font=_font(9),
             text_color=C["text_dim"], anchor="w")
@@ -2646,6 +2650,16 @@ class PlayerBar(ctk.CTkFrame):
     def _stop(self) -> None:
         from utils.audio_player import AudioPlayer
         AudioPlayer.get().stop()
+
+    def _open_now_playing(self) -> None:
+        from utils.audio_player import AudioPlayer
+        if AudioPlayer.get().current is None:
+            return
+        if self._now_playing_win is not None and self._now_playing_win.winfo_exists():
+            self._now_playing_win.lift()
+            self._now_playing_win.focus_force()
+            return
+        self._now_playing_win = NowPlayingWindow(self.winfo_toplevel())
 
     def _prev(self) -> None:
         from utils.audio_player import AudioPlayer
@@ -2777,6 +2791,257 @@ def _fmt_mmss(seconds: float) -> str:
         return "0:00"
     s = int(seconds)
     return f"{s // 60}:{s % 60:02d}"
+
+
+class NowPlayingWindow(ctk.CTkToplevel):
+    """Full-screen "Now Playing" view, Apple Music style.
+
+    Big square cover, large title / artist underneath, transport
+    controls + scrubber.  Closes with Esc or by clicking ✕.  Tracks the
+    AudioPlayer so swapping songs or pressing prev/next from anywhere
+    refreshes the view live.
+    """
+
+    COVER_SIZE = 360
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Now Playing")
+        self.geometry("520x720")
+        self.minsize(440, 640)
+        self.configure(fg_color=C["bg"])
+        try:
+            self.transient(parent)
+        except Exception:
+            pass
+
+        self._seeking = False
+        self._tick_id: Optional[str] = None
+        self._cover_cache_key: Optional[bytes] = None
+        self._cover_img: Optional[ctk.CTkImage] = None
+        self._build()
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        from utils.audio_player import AudioPlayer
+        AudioPlayer.get().subscribe(self._on_player_state)
+        self._refresh()
+
+    def _build(self) -> None:
+        # Close button (top-right)
+        top = ctk.CTkFrame(self, fg_color="transparent", height=34)
+        top.pack(fill="x", padx=10, pady=(8, 0))
+        top.pack_propagate(False)
+        ctk.CTkLabel(top, text="NOW PLAYING",
+                     font=_font(9, "bold"),
+                     text_color=C["text_dim"]).pack(side="left", padx=6)
+        ctk.CTkButton(top, text="✕", width=30, height=26,
+                      font=_font(13, "bold"),
+                      fg_color="transparent", hover_color=C["surface"],
+                      text_color=C["text_mid"], corner_radius=6,
+                      command=self._on_close).pack(side="right")
+
+        body = ctk.CTkFrame(self, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=40, pady=(8, 16))
+
+        # Cover — a sunken card to make it pop on a dark bg
+        cover_card = ctk.CTkFrame(
+            body, fg_color=C["surface"], corner_radius=14,
+            width=self.COVER_SIZE + 4, height=self.COVER_SIZE + 4)
+        cover_card.pack(pady=(20, 24))
+        cover_card.pack_propagate(False)
+        self._cover_lbl = ctk.CTkLabel(
+            cover_card, text="♪", font=_font(80, "bold"),
+            text_color=C["text_dim"],
+            width=self.COVER_SIZE, height=self.COVER_SIZE,
+            corner_radius=12)
+        self._cover_lbl.place(relx=0.5, rely=0.5, anchor="center")
+
+        # Title + artist
+        self._title_lbl = ctk.CTkLabel(
+            body, text="", font=_font(18, "bold"),
+            text_color=C["text"], anchor="center", justify="center")
+        self._title_lbl.pack(fill="x", pady=(0, 4))
+        self._artist_lbl = ctk.CTkLabel(
+            body, text="", font=_font(12),
+            text_color=C["text_dim"], anchor="center", justify="center")
+        self._artist_lbl.pack(fill="x", pady=(0, 22))
+
+        # Scrubber row
+        scrub_row = ctk.CTkFrame(body, fg_color="transparent")
+        scrub_row.pack(fill="x", padx=4)
+        self._seek = ctk.CTkSlider(
+            scrub_row, from_=0, to=1000, height=14,
+            command=self._on_seek_drag)
+        self._seek.set(0)
+        self._seek.bind("<ButtonRelease-1>", self._on_seek_release)
+        self._seek.bind("<Button-1>", self._on_seek_press)
+        self._seek.pack(fill="x", pady=(0, 4))
+
+        time_row = ctk.CTkFrame(body, fg_color="transparent")
+        time_row.pack(fill="x", padx=4)
+        self._elapsed = ctk.CTkLabel(time_row, text="0:00", font=_font(9),
+                                     text_color=C["text_dim"])
+        self._elapsed.pack(side="left")
+        self._total = ctk.CTkLabel(time_row, text="0:00", font=_font(9),
+                                   text_color=C["text_dim"])
+        self._total.pack(side="right")
+
+        # Transport
+        transport = ctk.CTkFrame(body, fg_color="transparent")
+        transport.pack(pady=20)
+        self._prev_btn = ctk.CTkButton(
+            transport, text="⏮", width=50, height=44, font=_font(22, "bold"),
+            fg_color="transparent", hover_color=C["surface"],
+            text_color=C["text"], corner_radius=22,
+            command=self._prev)
+        self._prev_btn.pack(side="left", padx=10)
+        self._pp_btn = ctk.CTkButton(
+            transport, text="▶", width=64, height=56, font=_font(26, "bold"),
+            fg_color=C["accent"], hover_color=C["accent_dim"],
+            text_color=C["bg"], corner_radius=28,
+            command=self._toggle_pause)
+        self._pp_btn.pack(side="left", padx=14)
+        self._next_btn = ctk.CTkButton(
+            transport, text="⏭", width=50, height=44, font=_font(22, "bold"),
+            fg_color="transparent", hover_color=C["surface"],
+            text_color=C["text"], corner_radius=22,
+            command=self._next)
+        self._next_btn.pack(side="left", padx=10)
+
+        # Volume
+        vol_row = ctk.CTkFrame(body, fg_color="transparent")
+        vol_row.pack(fill="x", padx=20, pady=(6, 0))
+        ctk.CTkLabel(vol_row, text="🔈", font=_font(12),
+                     text_color=C["text_dim"]).pack(side="left", padx=(0, 6))
+        self._vol = ctk.CTkSlider(
+            vol_row, from_=0, to=100, height=14,
+            command=self._on_volume)
+        self._vol.set(80)
+        self._vol.pack(side="left", fill="x", expand=True)
+        ctk.CTkLabel(vol_row, text="🔊", font=_font(12),
+                     text_color=C["text_dim"]).pack(side="left", padx=(6, 0))
+
+    # ── Actions ─────────────────────────────────────────────────────────────
+    def _toggle_pause(self) -> None:
+        from utils.audio_player import AudioPlayer
+        AudioPlayer.get().toggle_pause()
+
+    def _prev(self) -> None:
+        from utils.audio_player import AudioPlayer
+        AudioPlayer.get().prev()
+
+    def _next(self) -> None:
+        from utils.audio_player import AudioPlayer
+        AudioPlayer.get().next()
+
+    def _on_volume(self, value: float) -> None:
+        from utils.audio_player import AudioPlayer
+        AudioPlayer.get().set_volume(value / 100.0)
+
+    def _on_seek_press(self, _e=None) -> None:
+        self._seeking = True
+
+    def _on_seek_drag(self, value: float) -> None:
+        from utils.audio_player import AudioPlayer
+        dur = AudioPlayer.get().duration
+        if dur > 0:
+            self._elapsed.configure(text=_fmt_mmss(dur * (value / 1000.0)))
+
+    def _on_seek_release(self, _e=None) -> None:
+        from utils.audio_player import AudioPlayer
+        player = AudioPlayer.get()
+        dur = player.duration
+        if dur > 0:
+            player.seek(dur * (self._seek.get() / 1000.0))
+        self._seeking = False
+
+    # ── State sync ──────────────────────────────────────────────────────────
+    def _on_player_state(self) -> None:
+        try:
+            if self.winfo_exists():
+                self.after(0, self._refresh)
+        except Exception:
+            pass
+
+    def _refresh(self) -> None:
+        from utils.audio_player import AudioPlayer
+        player = AudioPlayer.get()
+        if player.current is None:
+            self.destroy()
+            return
+        title  = player.title or player.current.stem
+        artist = player.artist or "—"
+        self._title_lbl.configure(text=title[:64])
+        self._artist_lbl.configure(text=artist[:64])
+        self._refresh_cover(player.cover_bytes)
+        self._pp_btn.configure(text="⏸" if not player.paused else "▶")
+        self._prev_btn.configure(state="normal" if player.has_prev else "disabled")
+        self._next_btn.configure(state="normal" if player.has_next else "disabled")
+        try:
+            self._vol.set(int(player.volume * 100))
+        except Exception:
+            pass
+        dur = player.duration
+        self._total.configure(text=_fmt_mmss(dur) if dur > 0 else "--:--")
+        self._start_tick()
+
+    def _refresh_cover(self, data: Optional[bytes]) -> None:
+        if data is self._cover_cache_key and self._cover_img is not None:
+            return
+        self._cover_cache_key = data
+        if not data:
+            self._cover_img = None
+            self._cover_lbl.configure(image=None, text="♪")
+            return
+        try:
+            import io
+            from PIL import Image
+            img = Image.open(io.BytesIO(data)).convert("RGB")
+            img.thumbnail((self.COVER_SIZE * 2, self.COVER_SIZE * 2),
+                          Image.Resampling.LANCZOS)
+            self._cover_img = ctk.CTkImage(
+                light_image=img, dark_image=img,
+                size=(self.COVER_SIZE, self.COVER_SIZE))
+            self._cover_lbl.configure(image=self._cover_img, text="")
+        except Exception:
+            self._cover_img = None
+            self._cover_lbl.configure(image=None, text="♪")
+
+    def _start_tick(self) -> None:
+        if self._tick_id is not None:
+            return
+        self._tick_id = self.after(500, self._tick)
+
+    def _tick(self) -> None:
+        self._tick_id = None
+        try:
+            if not self.winfo_exists():
+                return
+        except Exception:
+            return
+        from utils.audio_player import AudioPlayer
+        player = AudioPlayer.get()
+        if player.current is None:
+            self.destroy()
+            return
+        pos = player.get_position()
+        dur = player.duration
+        if not self._seeking:
+            if dur > 0:
+                self._seek.set(min(1000, (pos / dur) * 1000))
+            self._elapsed.configure(text=_fmt_mmss(pos))
+        delay = 500 if not player.paused else 800
+        self._tick_id = self.after(delay, self._tick)
+
+    def _on_close(self) -> None:
+        if self._tick_id is not None:
+            try:
+                self.after_cancel(self._tick_id)
+            except Exception:
+                pass
+            self._tick_id = None
+        self.destroy()
 
 
 class Sidebar(ctk.CTkFrame):
