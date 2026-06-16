@@ -615,8 +615,9 @@ def enrich_files(entries: Iterable[dict], fmt: str, api_key: str = "",
     renames: dict = {}
 
     if not total:
-        return {"total": 0, "tagged": 0, "db": 0, "local": 0, "covers": 0,
-                "lowq": 0, "renamed": 0, "gained": 0, "renames": {}}
+        return {"total": 0, "tagged": 0, "beatport": 0, "db": 0,
+                "local": 0, "covers": 0, "lowq": 0, "renamed": 0,
+                "gained": 0, "renames": {}}
 
     fmt_l = (fmt or "").lower()
     lossless = fmt_l in ("flac", "wav", "wave")
@@ -625,12 +626,19 @@ def enrich_files(entries: Iterable[dict], fmt: str, api_key: str = "",
     do_quality = bool(check_quality and want_kbps and not lossless)
 
     session = None
-    if api_key:
-        try:
-            import requests
-            session = requests.Session()
-        except Exception:
-            session = None
+    try:
+        import requests
+        session = requests.Session()
+    except Exception:
+        session = None
+
+    # Beatport is queried first for every track — no API key needed.
+    try:
+        from . import beatport as _beatport
+    except Exception:
+        _beatport = None
+
+    from_beatport = 0
 
     for e in items:
         if stop_check and not stop_check():
@@ -644,15 +652,26 @@ def enrich_files(entries: Iterable[dict], fmt: str, api_key: str = "",
 
         title = e.get("title", "?")
 
-        # 1. Real BPM/key/genre from the database first.
+        # 1. Beatport first — gold standard for electronic music
+        #    (BPM / key / Camelot / genre / label all curated).
         info = None
-        if api_key:
+        if _beatport is not None:
+            info = _beatport.lookup_beatport(
+                e.get("artist", ""), title, session=session)
+            if info:
+                from_beatport += 1
+                # Normalise: lookup_getsongbpm returns "publisher" and
+                # "year" at the top level; beatport already matches.
+            time.sleep(0.15)
+
+        # 2. GetSongBPM fallback when Beatport had nothing.
+        if info is None and api_key:
             info = lookup_getsongbpm(e.get("artist", ""), title, api_key, session)
             if info:
                 from_db += 1
             time.sleep(0.2)  # be gentle with the API rate limit
 
-        # 2. One librosa pass for whatever is still missing (key/bpm) + quality.
+        # 3. One librosa pass for whatever is still missing (key/bpm) + quality.
         need_kb = (info is None) and use_local_fallback
         if need_kb or do_quality:
             local = analyze_local(e["path"], with_quality=do_quality,
@@ -672,12 +691,12 @@ def enrich_files(entries: Iterable[dict], fmt: str, api_key: str = "",
                              + (f" (corte {khz:.1f} kHz)" if khz else "")
                              + f", pediste {want_kbps} kbps", "warning")
 
-        # 3. Embed full-resolution cover if one is available and missing.
+        # 4. Embed full-resolution cover if one is available and missing.
         if embed_covers and e.get("cover_url"):
             if embed_cover(e["path"], fmt, e["cover_url"], only_if_missing=True):
                 covers += 1
 
-        # 4. ReplayGain (loudness normalisation tags).
+        # 5. ReplayGain (loudness normalisation tags).
         rg_gain = rg_peak = ""
         if replaygain:
             m = measure_loudness(e["path"], ffmpeg)
@@ -705,7 +724,12 @@ def enrich_files(entries: Iterable[dict], fmt: str, api_key: str = "",
             tagged += 1
             bpm = info.get("bpm") or "?"
             cam = info.get("camelot") or info.get("key") or "?"
-            src = "DB" if info.get("source") == "getsongbpm" else "local"
+            src_label = {
+                "beatport":   "Beatport",
+                "getsongbpm": "DB",
+                "librosa":    "local",
+            }
+            src = src_label.get(info.get("source", ""), "local")
             extra = " · RG" if rg_gain else ""
             _log(f"   ♪ {title}  ·  {bpm} BPM  ·  {cam}  ({src}){extra}", "success")
 
@@ -717,6 +741,7 @@ def enrich_files(entries: Iterable[dict], fmt: str, api_key: str = "",
                 e["path"] = new_path
                 renamed += 1
 
-    return {"total": total, "tagged": tagged, "db": from_db,
-            "local": from_local, "covers": covers, "lowq": lowq,
-            "renamed": renamed, "gained": gained, "renames": renames}
+    return {"total": total, "tagged": tagged, "beatport": from_beatport,
+            "db": from_db, "local": from_local, "covers": covers,
+            "lowq": lowq, "renamed": renamed, "gained": gained,
+            "renames": renames}
