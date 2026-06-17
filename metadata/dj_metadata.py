@@ -720,6 +720,10 @@ def enrich_files(entries: Iterable[dict], fmt: str, api_key: str = "",
         has_payload = any(info.get(k) for k in (
             "bpm", "key", "camelot", "genre", "year", "publisher",
             "track_number", "rg_gain"))
+        # Expose the metadata source on the input dict so the controller
+        # can persist it on the history record.
+        if info.get("source"):
+            e["metadata_source"] = info["source"]
         if has_payload and write_tags(e["path"], fmt, info):
             tagged += 1
             bpm = info.get("bpm") or "?"

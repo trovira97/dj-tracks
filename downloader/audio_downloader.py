@@ -92,6 +92,7 @@ class DownloadTask:
     output_path: Optional[Path] = None
     error_msg:   str            = ""
     task_id:     str            = field(default_factory=lambda: uuid.uuid4().hex)
+    metadata_source: str        = ""   # "beatport" / "getsongbpm" / "librosa"
 
     @property
     def display_name(self) -> str:

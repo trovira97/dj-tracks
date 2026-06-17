@@ -864,8 +864,29 @@ class HistoryRow(ctk.CTkFrame):
 
         info = ctk.CTkFrame(self, fg_color="transparent")
         info.pack(side="left", fill="both", expand=True, pady=8)
-        ctk.CTkLabel(info, text=r.title or "Unknown", font=_font(11, "bold"),
-                     text_color=C["text"], anchor="w").pack(fill="x")
+
+        # Title row: title + (optional) Beatport / DB / local badge inline.
+        title_row = ctk.CTkFrame(info, fg_color="transparent")
+        title_row.pack(fill="x")
+        ctk.CTkLabel(title_row, text=r.title or "Unknown",
+                     font=_font(11, "bold"),
+                     text_color=C["text"], anchor="w").pack(side="left")
+        src = getattr(r, "metadata_source", "") or ""
+        if src:
+            badge_styles = {
+                "beatport":   ("BEATPORT", "#00FFB9", "#003B2A"),
+                "getsongbpm": ("DB",       C["text_mid"], C["surface"]),
+                "librosa":    ("LOCAL",    C["text_dim"], C["surface"]),
+            }
+            label, fg, bg = badge_styles.get(src, (src.upper(), C["text_dim"], C["surface"]))
+            badge_w = max(36, len(label) * 7 + 12)
+            ctk.CTkLabel(title_row, text=label,
+                         font=_font(7, "bold"),
+                         text_color=fg, fg_color=bg,
+                         corner_radius=4,
+                         width=badge_w, height=16
+                         ).pack(side="left", padx=(8, 0))
+
         ctk.CTkLabel(info, text=r.artist or "—", font=_font(10),
                      text_color=C["text_mid"], anchor="w").pack(fill="x")
 

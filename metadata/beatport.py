@@ -19,10 +19,86 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import threading
+import time
 from typing import Optional
 
 log = logging.getLogger("dj_tracks.beatport")
+
+# ── Disk cache ───────────────────────────────────────────────────────────────
+# BPM, key and label of a released track don't change, so cache forever.
+# Negative results (None) are cached too — with a short 7-day TTL — so we
+# don't hammer Beatport every retry for tracks they don't have.
+
+_CACHE_LOCK = threading.Lock()
+_CACHE: Optional[dict] = None
+_CACHE_PATH: Optional[str] = None
+_NEG_TTL_SEC = 7 * 24 * 3600
+
+
+def _cache_path() -> str:
+    global _CACHE_PATH
+    if _CACHE_PATH is not None:
+        return _CACHE_PATH
+    try:
+        from platformdirs import user_cache_dir
+        d = user_cache_dir("DJ Tracks", "DJ Tracks")
+    except Exception:
+        d = os.path.join(os.path.expanduser("~"), ".dj_tracks_cache")
+    os.makedirs(d, exist_ok=True)
+    _CACHE_PATH = os.path.join(d, "beatport.json")
+    return _CACHE_PATH
+
+
+def _load_cache() -> dict:
+    global _CACHE
+    if _CACHE is not None:
+        return _CACHE
+    try:
+        with open(_cache_path(), "r", encoding="utf-8") as fh:
+            _CACHE = json.load(fh) or {}
+    except Exception:
+        _CACHE = {}
+    return _CACHE
+
+
+def _save_cache() -> None:
+    if _CACHE is None:
+        return
+    path = _cache_path()
+    tmp  = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(_CACHE, fh, ensure_ascii=False)
+        os.replace(tmp, path)
+    except Exception as exc:
+        log.debug(f"[Beatport] cache save failed: {exc}")
+
+
+def _cache_key(artist: str, title: str) -> str:
+    return f"{(artist or '').strip().lower()}|{(title or '').strip().lower()}"
+
+
+def _cache_get(key: str) -> tuple[bool, Optional[dict]]:
+    """Return (hit, value).  value is None for a cached negative."""
+    with _CACHE_LOCK:
+        entry = _load_cache().get(key)
+    if entry is None:
+        return False, None
+    if entry.get("data") is None:
+        # Negative cache — check TTL.
+        if time.time() - entry.get("t", 0) > _NEG_TTL_SEC:
+            return False, None
+        return True, None
+    return True, entry["data"]
+
+
+def _cache_put(key: str, value: Optional[dict]) -> None:
+    with _CACHE_LOCK:
+        _load_cache()[key] = {"data": value, "t": int(time.time())}
+        _save_cache()
 
 _SEARCH_URL = "https://www.beatport.com/search/tracks?q={q}"
 _HEADERS = {
@@ -309,22 +385,38 @@ def search(query_artist: str, query_title: str, session=None,
 
 def lookup_beatport(artist: str, title: str,
                     session=None,
-                    min_score: float = 70.0) -> Optional[dict]:
+                    min_score: float = 70.0,
+                    use_cache: bool = True) -> Optional[dict]:
     """Return the best Beatport match if it scores above *min_score*,
     else None.  Output shape mirrors lookup_getsongbpm so callers can
     treat both sources interchangeably.
 
-    Drops the internal ``_score`` field from the returned dict.
+    Results (positive and negative) are cached to disk so the second
+    enrichment of the same track is free.  Pass ``use_cache=False`` to
+    force a fresh lookup.
     """
+    key = _cache_key(artist, title)
+    if use_cache:
+        hit, value = _cache_get(key)
+        if hit:
+            return value
+
     results = search(artist, title, session=session, max_results=5)
     if not results:
+        if use_cache:
+            _cache_put(key, None)
         return None
     best = results[0]
     if best.get("_score", 0) < min_score:
         log.debug(f"[Beatport] best match below threshold: "
                   f"{best['title']} ({best.get('_score', 0):.1f})")
+        if use_cache:
+            _cache_put(key, None)
         return None
     out = {k: v for k, v in best.items() if k != "_score"}
     # Drop empty / null fields so the caller can use `dict.update()`
     # without overwriting good data with nothing.
-    return {k: v for k, v in out.items() if v not in (None, "", [], 0)}
+    cleaned = {k: v for k, v in out.items() if v not in (None, "", [], 0)}
+    if use_cache:
+        _cache_put(key, cleaned)
+    return cleaned

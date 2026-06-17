@@ -521,6 +521,9 @@ class AppController:
             new_path = renames.get(str(task.output_path))
             if new_path:
                 task.output_path = Path(new_path)
+            # Carry the metadata source through to the history record.
+            if entry.get("metadata_source"):
+                task.metadata_source = entry["metadata_source"]
             log.info(f"[Controller] DJ enrich: {result.get('tagged', 0)} etiquetado(s)")
         except Exception as exc:
             log.error(f"[Controller] Error en enriquecimiento DJ: {exc}")

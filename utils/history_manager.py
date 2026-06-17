@@ -34,6 +34,7 @@ class DownloadRecord:
     __slots__ = (
         "id", "timestamp", "title", "artist", "album",
         "platform", "quality", "status", "path", "duration_ms", "error",
+        "metadata_source",
     )
 
     def __init__(
@@ -49,18 +50,20 @@ class DownloadRecord:
         error: str = "",
         record_id: str = "",
         timestamp: str = "",
+        metadata_source: str = "",
     ) -> None:
-        self.id          = record_id or uuid.uuid4().hex
-        self.timestamp   = timestamp or datetime.now().isoformat(timespec="seconds")
-        self.title       = title
-        self.artist      = artist
-        self.album       = album
-        self.platform    = platform
-        self.quality     = quality
-        self.status      = status
-        self.path        = path
-        self.duration_ms = duration_ms
-        self.error       = error
+        self.id              = record_id or uuid.uuid4().hex
+        self.timestamp       = timestamp or datetime.now().isoformat(timespec="seconds")
+        self.title           = title
+        self.artist          = artist
+        self.album           = album
+        self.platform        = platform
+        self.quality         = quality
+        self.status          = status
+        self.path            = path
+        self.duration_ms     = duration_ms
+        self.error           = error
+        self.metadata_source = metadata_source
 
     def to_dict(self) -> Dict:
         return {k: getattr(self, k) for k in self.__slots__}
@@ -79,6 +82,7 @@ class DownloadRecord:
             error       = d.get("error", ""),
             record_id   = d.get("id", ""),
             timestamp   = d.get("timestamp", ""),
+            metadata_source = d.get("metadata_source", ""),
         )
 
     @property
@@ -151,6 +155,7 @@ class HistoryManager:
             path        = str(task.output_path) if task.output_path else "",
             duration_ms = task.track.duration_ms,
             error       = task.error_msg or "",
+            metadata_source = getattr(task, "metadata_source", "") or "",
         )
         with self._lock:
             self._records.insert(0, rec)          # newest first
