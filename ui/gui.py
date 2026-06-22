@@ -2190,6 +2190,13 @@ class SettingsPanel(ctk.CTkFrame):
 
         self._maint_button(
             maint_card,
+            label=f"Buscar actualizaciones de DJ Tracks  ·  v{__version__}",
+            hint="Comprueba GitHub y descarga la última versión si hay una más nueva",
+            command=self._handle_update_app)
+        Divider(maint_card).pack(fill="x", padx=14, pady=2)
+
+        self._maint_button(
+            maint_card,
             label="Actualizar yt-dlp",
             hint="Arregla la mayoría de errores 403 / «vídeo no disponible» (YouTube cambia cada 2-3 meses)",
             command=self._handle_update_ytdlp)
@@ -2289,6 +2296,97 @@ class SettingsPanel(ctk.CTkFrame):
     def _handle_clear_cache(self) -> None:
         if self._on_clear_cover_cache:
             self._on_clear_cover_cache()
+
+    def _handle_update_app(self) -> None:
+        """Check GitHub Releases for a newer DJ Tracks build and offer
+        to download + install it."""
+        from tkinter import messagebox
+        from utils import app_updater
+
+        top = self.winfo_toplevel()
+
+        def _show_toast(msg: str, kind: str = "info") -> None:
+            try:
+                if hasattr(top, "_toast"):
+                    top._toast(msg, kind)
+            except Exception:
+                pass
+
+        def _worker() -> None:
+            info = app_updater.check_for_update(__version__)
+            self.after(0, lambda: _on_check_done(info))
+
+        def _on_check_done(info: dict) -> None:
+            if not info.get("available"):
+                latest = info.get("latest") or "?"
+                messagebox.showinfo(
+                    "DJ Tracks",
+                    f"Ya tienes la última versión.\n\n"
+                    f"  Instalada: v{__version__}\n"
+                    f"  Última publicada: {latest or '(no encontrada)'}\n"
+                    f"  Repo: {info.get('repo', '?')}",
+                )
+                return
+            size_mb = (info.get("asset_size") or 0) / (1024 * 1024)
+            notes = info.get("body") or "(sin notas)"
+            if not messagebox.askyesno(
+                "Actualización disponible",
+                f"Hay una versión nueva de DJ Tracks:\n\n"
+                f"  Tu versión:  v{__version__}\n"
+                f"  Nueva:       {info['latest']}\n"
+                f"  Tamaño:      {size_mb:.1f} MB\n"
+                f"  Asset:       {info.get('asset_name', '?')}\n\n"
+                f"Notas:\n{notes[:400]}\n\n"
+                f"¿Descargar e instalar ahora? La app se cerrará y "
+                f"reabrirá automáticamente.",
+            ):
+                return
+            # Frozen-build guard — from source we can't swap an .exe.
+            if not app_updater.is_frozen():
+                messagebox.showwarning(
+                    "DJ Tracks",
+                    "Esta build está ejecutándose desde el código fuente. "
+                    "La actualización automática sólo funciona en el .exe "
+                    "empaquetado.  Abre la página de la release en GitHub "
+                    "y descárgala manualmente.",
+                )
+                try:
+                    import webbrowser
+                    webbrowser.open(info.get("url", ""))
+                except Exception:
+                    pass
+                return
+            _show_toast(f"⬇ Descargando {info['asset_name']}…", "info")
+            threading.Thread(
+                target=lambda: _do_download(info),
+                daemon=True,
+            ).start()
+
+        def _do_download(info: dict) -> None:
+            import tempfile
+            dest = Path(tempfile.gettempdir()) / info["asset_name"]
+            ok = app_updater.download_asset(info["asset_url"], dest)
+            if not ok:
+                self.after(0, lambda: messagebox.showerror(
+                    "DJ Tracks",
+                    "Falló la descarga.  Comprueba la conexión y vuelve a "
+                    "intentarlo."))
+                return
+            # Swap on the main thread so the messagebox shows correctly
+            # before the process exits.
+            self.after(0, lambda: _do_apply(dest))
+
+        def _do_apply(dest: Path) -> None:
+            _show_toast("✓ Descarga completa — reiniciando…", "success")
+            ok = app_updater.apply_update(dest)
+            if not ok:
+                messagebox.showerror(
+                    "DJ Tracks",
+                    "No se pudo aplicar la actualización.  El archivo "
+                    f"descargado está en:\n\n{dest}\n\nÁbrelo manualmente.")
+
+        _show_toast("🔍 Buscando actualizaciones de DJ Tracks…", "info")
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _handle_update_ytdlp(self) -> None:
         """Check PyPI and upgrade yt-dlp if a newer version is available."""
