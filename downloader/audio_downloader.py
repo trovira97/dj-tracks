@@ -93,6 +93,8 @@ class DownloadTask:
     error_msg:   str            = ""
     task_id:     str            = field(default_factory=lambda: uuid.uuid4().hex)
     metadata_source: str        = ""   # "beatport" / "getsongbpm" / "librosa"
+    error_raw:   str            = ""   # untranslated yt-dlp error, used for
+                                       # cross-platform retry classification
 
     @property
     def display_name(self) -> str:
@@ -429,8 +431,10 @@ class AudioDownloader:
                 continue
 
         # All attempts exhausted.
+        raw = str(last_exc) if last_exc else "Error desconocido"
         task.status    = DownloadStatus.ERROR
-        task.error_msg = self._humanise_error(str(last_exc) if last_exc else "Error desconocido")
+        task.error_raw = raw
+        task.error_msg = self._humanise_error(raw)
         self._notify(task, 0, f"Error: {task.error_msg}")
         log.error(f"[Downloader yt-dlp] Error definitivo tras reintentos: {last_exc}")
         return False
@@ -658,6 +662,97 @@ class AudioDownloader:
 
     # ── Error mapping ─────────────────────────────────────────────────────────
 
+    # Error-class detectors (all operate on the RAW yt-dlp message).
+    # Order matters in _humanise_error; the detectors themselves are
+    # independent and used directly by the controller's retry logic.
+
+    @staticmethod
+    def is_drm_error(raw: str) -> bool:
+        """True if *raw* looks like content the current source cannot
+        deliver — strict DRM, HLS+AES "soft DRM", or login-only previews
+        that yt-dlp surfaces as the same family of errors.
+
+        These are all "give up on this source, try another" conditions
+        from the user's point of view.
+        """
+        if not raw:
+            return False
+        low = raw.lower()
+        # 1. Explicit DRM keywords (yt-dlp's drm-protected tag).
+        if "drm" in low:
+            return True
+        # 2. SoundCloud preview / login-required.  yt-dlp says one of:
+        #    "This track is not currently available"
+        #    "This track is not available in your country"
+        #    "Sign in to download this track"
+        #    "preview is not available"
+        #    "Track requires authentication"
+        sc_markers = (
+            "not currently available",
+            "not available in your country",
+            "sign in to download",
+            "preview is not available",
+            "requires authentication",
+            "track is not available for streaming",
+        )
+        if any(m in low for m in sc_markers):
+            return True
+        # 3. HLS encryption surfaced as a hard failure.
+        if "hls" in low and ("encrypted" in low or "aes" in low or "key" in low):
+            if "403" in low or "forbidden" in low or "failed" in low:
+                return True
+        return False
+
+    @staticmethod
+    def is_geo_error(raw: str) -> bool:
+        if not raw:
+            return False
+        low = raw.lower()
+        return (
+            ("geo" in low and ("restrict" in low or "block" in low))
+            or "not available in your country" in low
+            or "blocked it on copyright grounds" in low
+        )
+
+    @staticmethod
+    def is_age_error(raw: str) -> bool:
+        if not raw:
+            return False
+        low = raw.lower()
+        return ("age-restricted" in low or "age restricted" in low
+                or "sign in to confirm" in low or "inappropriate" in low)
+
+    @staticmethod
+    def is_private_error(raw: str) -> bool:
+        if not raw:
+            return False
+        low = raw.lower()
+        return ("private video" in low or "this video is private" in low
+                or "video unavailable" in low and "private" in low)
+
+    @staticmethod
+    def is_premium_error(raw: str) -> bool:
+        if not raw:
+            return False
+        low = raw.lower()
+        return ("members-only" in low or "members only" in low
+                or "premium" in low or "subscriber" in low)
+
+    @staticmethod
+    def is_irrecoverable_error(raw: str) -> bool:
+        """True if no amount of retrying THIS source will help.  These
+        are the cases that should fall back to the cross-platform retry.
+
+        Plain 403 / 404 / network errors are deliberately NOT in here:
+        they may succeed on a fresh attempt with the same source, or are
+        bugs in our own request (stale yt-dlp, cookies expired, etc.).
+        """
+        return (AudioDownloader.is_drm_error(raw)
+                or AudioDownloader.is_geo_error(raw)
+                or AudioDownloader.is_age_error(raw)
+                or AudioDownloader.is_private_error(raw)
+                or AudioDownloader.is_premium_error(raw))
+
     @staticmethod
     def _humanise_error(raw: str) -> str:
         """
@@ -667,23 +762,27 @@ class AudioDownloader:
         last meaningful line keeps the row tidy while logs still capture the
         full detail.
         """
+        # Class-based dispatch first so we never lie about what will
+        # happen next — the controller decides whether to retry, this
+        # function just describes the *cause*.
+        if AudioDownloader.is_drm_error(raw):
+            return "Audio protegido o restringido en esta fuente"
+        if AudioDownloader.is_geo_error(raw):
+            return "Bloqueado en tu región"
+        if AudioDownloader.is_age_error(raw):
+            return "Vídeo con restricción de edad"
+        if AudioDownloader.is_private_error(raw):
+            return "Vídeo privado"
+        if AudioDownloader.is_premium_error(raw):
+            return "Contenido sólo para miembros / premium"
+
         low = raw.lower()
-        if "drm" in low or "drm protected" in low or "drm-protected" in low:
-            return "Audio protegido con DRM — probando en otras plataformas…"
         if "403" in low or "forbidden" in low:
-            return "Acceso denegado (403) — vídeo restringido o yt-dlp desactualizado"
+            return "Acceso denegado (403) — fuente restringida o yt-dlp desactualizado"
         if "404" in low or "not found" in low:
             return "No se encontró el contenido (404)"
         if "429" in low or "too many requests" in low:
             return "Rate limit alcanzado — espera unos minutos"
-        if "age-restricted" in low or "sign in to confirm" in low:
-            return "Vídeo con restricción de edad"
-        if "private video" in low:
-            return "Vídeo privado"
-        if "members-only" in low or "premium" in low:
-            return "Contenido sólo para miembros / premium"
-        if "geo" in low and ("restrict" in low or "block" in low):
-            return "Bloqueado en tu región"
         if "ffmpeg" in low:
             return "Error de conversión de audio (ffmpeg)"
         if "no such file" in low or "permission denied" in low:
@@ -694,11 +793,3 @@ class AudioDownloader:
         # Fallback: keep only the last line so the row stays readable.
         last = raw.strip().splitlines()[-1] if raw.strip() else "Error desconocido"
         return last[:140]
-
-    @staticmethod
-    def is_drm_error(raw: str) -> bool:
-        """True if *raw* looks like a DRM-protected-content failure."""
-        if not raw:
-            return False
-        low = raw.lower()
-        return "drm" in low

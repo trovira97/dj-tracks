@@ -346,16 +346,13 @@ class AppController:
             return
         failed_task._retried_cross_platform = True   # type: ignore[attr-defined]
 
-        msg = (failed_task.error_msg or "").lower()
         from downloader.audio_downloader import AudioDownloader
-        is_drm = AudioDownloader.is_drm_error(msg)
-        is_geo = "geo" in msg or "region" in msg
-        is_age = "edad" in msg or "age-restricted" in msg or "age restricted" in msg
-        is_priv = "privado" in msg or "private" in msg
-        is_prem = "premium" in msg or "miembros" in msg or "members" in msg
-        irrecoverable = is_drm or is_geo or is_age or is_priv or is_prem
-        if not irrecoverable:
-            return   # 403/404/network errors aren't fixed by changing platform
+        # Always classify on the RAW error text — the humanised message
+        # is Spanish-translated and loses the patterns yt-dlp emitted.
+        raw = (getattr(failed_task, "error_raw", "")
+               or failed_task.error_msg or "")
+        if not AudioDownloader.is_irrecoverable_error(raw):
+            return   # 403/404/network errors may succeed on plain retry
 
         track       = failed_task.track
         orig_plat   = track.platform
