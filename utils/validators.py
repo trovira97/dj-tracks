@@ -17,6 +17,7 @@ class Platform(str, Enum):
     APPLE_MUSIC = "applemusic"
     SOUNDCLOUD  = "soundcloud"
     BANDCAMP    = "bandcamp"
+    YOUTUBE     = "youtube"
     UNKNOWN     = "unknown"
 
 
@@ -60,6 +61,9 @@ def detect_platform(url: str) -> Platform:
         return Platform.SOUNDCLOUD
     if "bandcamp.com" in lower:
         return Platform.BANDCAMP
+    if ("youtube.com" in lower or "youtu.be" in lower
+            or "music.youtube.com" in lower):
+        return Platform.YOUTUBE
     return Platform.UNKNOWN
 
 
@@ -88,6 +92,12 @@ def detect_content_type(url: str) -> ContentType:
         return ContentType.ARTIST
     if "/playlist/" in url:
         return ContentType.PLAYLIST
+
+    # YouTube — playlist takes precedence over the video id when both present
+    if "list=" in url:
+        return ContentType.PLAYLIST
+    if "youtu.be/" in url or "youtube.com/watch" in url or "youtube.com/shorts" in url:
+        return ContentType.TRACK
 
     return ContentType.UNKNOWN
 

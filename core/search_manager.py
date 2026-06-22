@@ -19,6 +19,7 @@ from providers.applemusic_provider  import AppleMusicProvider
 from providers.bandcamp_provider    import BandcampProvider
 from providers.soundcloud_provider  import SoundCloudProvider
 from providers.spotify_provider     import SpotifyProvider
+from providers.youtube_provider     import YouTubeProvider
 from utils.logger     import log
 from utils.validators import Platform, detect_platform
 
@@ -47,6 +48,7 @@ class SearchManager:
         apple_music: Optional[AppleMusicProvider] = None,
         soundcloud:  Optional[SoundCloudProvider] = None,
         bandcamp:    Optional[BandcampProvider]   = None,
+        youtube:     Optional[YouTubeProvider]    = None,
     ) -> None:
         self._providers: Dict[Platform, MusicProvider] = {}
 
@@ -58,12 +60,17 @@ class SearchManager:
             self._providers[Platform.SOUNDCLOUD]  = soundcloud
         if bandcamp:
             self._providers[Platform.BANDCAMP]    = bandcamp
+        if youtube:
+            self._providers[Platform.YOUTUBE]     = youtube
 
-        # Apple Music and Bandcamp are always available (no credentials).
+        # Apple Music, Bandcamp, and YouTube are always available
+        # (no credentials needed for any of them).
         if Platform.APPLE_MUSIC not in self._providers:
             self._providers[Platform.APPLE_MUSIC] = AppleMusicProvider()
         if Platform.BANDCAMP not in self._providers:
             self._providers[Platform.BANDCAMP] = BandcampProvider()
+        if Platform.YOUTUBE not in self._providers:
+            self._providers[Platform.YOUTUBE] = YouTubeProvider()
 
     # ── Public API ─────────────────────────────────────────────────────────────
 

@@ -298,6 +298,7 @@ class AudioDownloader:
         direct_url_platforms = {
             Platform.SOUNDCLOUD.value,
             Platform.BANDCAMP.value,
+            Platform.YOUTUBE.value,    # pasted YT URL → download directly
         }
         is_direct = track.platform in direct_url_platforms and bool(track.source_url)
         if is_direct:

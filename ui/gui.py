@@ -129,6 +129,7 @@ PLATFORM_LABELS: Dict[str, str] = {
     "applemusic": "APPLE MUSIC",
     "soundcloud": "SOUNDCLOUD",
     "bandcamp":   "BANDCAMP",
+    "youtube":    "YOUTUBE",
 }
 
 
@@ -142,6 +143,7 @@ def apply_theme(name: str) -> None:
         "applemusic": C["apple"],
         "soundcloud": C["sc"],
         "bandcamp":   C["bc"],
+        "youtube":    C.get("yt", "#FF0033"),
     })
 
 

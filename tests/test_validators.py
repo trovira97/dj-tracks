@@ -51,7 +51,9 @@ class TestDetectPlatform:
         ("https://www.soundcloud.com/user",            Platform.SOUNDCLOUD),
         ("https://artist.bandcamp.com/track/song",     Platform.BANDCAMP),
         ("https://artist.bandcamp.com/album/x",        Platform.BANDCAMP),
-        ("https://youtube.com/watch?v=xyz",            Platform.UNKNOWN),
+        ("https://youtube.com/watch?v=xyz",            Platform.YOUTUBE),
+        ("https://youtu.be/xyz",                       Platform.YOUTUBE),
+        ("https://music.youtube.com/watch?v=xyz",      Platform.YOUTUBE),
         ("not a url",                                  Platform.UNKNOWN),
     ])
     def test_detects(self, url, expected):
