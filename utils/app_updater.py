@@ -34,7 +34,7 @@ from typing import Callable, Optional
 log = logging.getLogger("dj_tracks.updater")
 
 # Default repo — overridden by settings.json["github_repo"].
-DEFAULT_REPO = "thiba/dj-tracks"
+DEFAULT_REPO = "trovira97/dj-tracks"
 
 
 # ── Version parsing ─────────────────────────────────────────────────────────
