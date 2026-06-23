@@ -9,6 +9,7 @@ Python 3.10+  ·  CustomTkinter  ·  Pillow
 from __future__ import annotations
 
 import io
+import logging
 import os
 import platform
 import subprocess
@@ -1916,6 +1917,250 @@ class HistoryPanel(ctk.CTkFrame):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Logs panel — in-app view of the root logger so users don't need a terminal
+# ─────────────────────────────────────────────────────────────────────────────
+
+class LogsPanel(ctk.CTkFrame):
+    """Live view of the app's log stream.
+
+    Hooks a custom logging.Handler into the root logger and polls a
+    queue every 250 ms to append new lines to a Tk Text widget.  Lines
+    are colour-coded by level and capped to MAX_LINES so the widget
+    stays snappy on long sessions.
+    """
+
+    MAX_LINES = 2000
+    LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
+    _LEVEL_COLORS = {
+        "DEBUG":   "#7C7C8B",
+        "INFO":    "#A1A1AA",
+        "WARNING": "#FACC15",
+        "ERROR":   "#EF4444",
+        "CRITICAL": "#EF4444",
+    }
+
+    def __init__(self, parent, **kw):
+        super().__init__(parent, fg_color=C["bg"], **kw)
+        import queue as _q
+        self._queue: "_q.Queue[tuple[str, str]]" = _q.Queue(maxsize=5000)
+        self._line_count = 0
+        self._filter_level = "INFO"
+        self._auto_scroll = True
+        self._build()
+        self._install_handler()
+        self._poll()
+
+    def _build(self) -> None:
+        # ── Header ────────────────────────────────────────────────────────
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.pack(fill="x", padx=20, pady=(20, 12))
+
+        ctk.CTkLabel(header, text="LOGS",
+                     font=_font(11, "bold"),
+                     text_color=C["text_dim"]).pack(side="left")
+        ctk.CTkLabel(header,
+                     text="  ·  Salida en vivo del sistema (errores, descargas, "
+                          "actualizaciones)",
+                     font=_font(10),
+                     text_color=C["text_dim"]).pack(side="left")
+
+        # Actions
+        ctk.CTkButton(header, text="📋 Copiar todo",
+                      width=110, height=28, font=_font(9, "bold"),
+                      fg_color=C["surface"], hover_color=C["card_hover"],
+                      text_color=C["text_mid"], corner_radius=6,
+                      command=self._copy_all).pack(side="right", padx=(6, 0))
+        ctk.CTkButton(header, text="🗑 Limpiar",
+                      width=90, height=28, font=_font(9, "bold"),
+                      fg_color=C["surface"], hover_color=C["card_hover"],
+                      text_color=C["text_mid"], corner_radius=6,
+                      command=self._clear).pack(side="right", padx=(6, 0))
+        ctk.CTkButton(header, text="📂 Carpeta de logs",
+                      width=130, height=28, font=_font(9, "bold"),
+                      fg_color=C["surface"], hover_color=C["card_hover"],
+                      text_color=C["text_mid"], corner_radius=6,
+                      command=self._open_folder).pack(side="right", padx=(6, 0))
+
+        # ── Filter chips ──────────────────────────────────────────────────
+        filt = ctk.CTkFrame(self, fg_color="transparent")
+        filt.pack(fill="x", padx=20, pady=(0, 8))
+        ctk.CTkLabel(filt, text="Filtro:", font=_font(9),
+                     text_color=C["text_dim"]).pack(side="left", padx=(0, 8))
+        self._filter_buttons = {}
+        for level in self.LEVELS:
+            btn = ctk.CTkButton(
+                filt, text=level, width=72, height=24, font=_font(8, "bold"),
+                fg_color=C["surface"], hover_color=C["card_hover"],
+                text_color=self._LEVEL_COLORS.get(level, C["text_mid"]),
+                corner_radius=4,
+                command=lambda lvl=level: self._set_filter(lvl),
+            )
+            btn.pack(side="left", padx=(0, 4))
+            self._filter_buttons[level] = btn
+        self._refresh_filter_buttons()
+
+        # ── Text widget ───────────────────────────────────────────────────
+        text_frame = ctk.CTkFrame(self, fg_color=C["card"], corner_radius=8)
+        text_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        self._text = tk.Text(
+            text_frame, wrap="none", font=("Cascadia Mono", 9),
+            bg=C["card"], fg=C["text_mid"],
+            insertbackground=C["text"], selectbackground=C["accent_dim"],
+            relief="flat", bd=0, padx=12, pady=10,
+            state="disabled",
+        )
+        # Configure colour tags per level
+        for lvl, col in self._LEVEL_COLORS.items():
+            self._text.tag_configure(lvl, foreground=col)
+        self._text.tag_configure("meta", foreground=C["text_dim"])
+
+        vbar = ctk.CTkScrollbar(text_frame, command=self._text.yview)
+        self._text.configure(yscrollcommand=self._on_scroll(vbar))
+        vbar.pack(side="right", fill="y")
+        self._text.pack(side="left", fill="both", expand=True)
+
+    # ── Auto-scroll detection ─────────────────────────────────────────────
+    def _on_scroll(self, vbar):
+        def _wrap(*args):
+            vbar.set(*args)
+            try:
+                # Auto-scroll only when the user is at the bottom.  As soon
+                # as they scroll up, we stop chasing the tail; resumes when
+                # they scroll all the way down again.
+                _, end = self._text.yview()
+                self._auto_scroll = (end > 0.999)
+            except Exception:
+                pass
+        return _wrap
+
+    # ── Logging handler hook ──────────────────────────────────────────────
+    def _install_handler(self) -> None:
+        import logging
+        existing = [h for h in logging.getLogger().handlers
+                    if getattr(h, "_dj_logs_panel", False)]
+        for h in existing:
+            logging.getLogger().removeHandler(h)
+        h = _PanelLogHandler(self._queue)
+        h.setLevel(logging.DEBUG)
+        h._dj_logs_panel = True   # type: ignore[attr-defined]
+        logging.getLogger().addHandler(h)
+        # Make sure root level is low enough so DEBUG records reach us
+        # (other handlers can still filter higher).
+        if logging.getLogger().level > logging.DEBUG:
+            logging.getLogger().setLevel(logging.DEBUG)
+
+    # ── Poll the queue and append new lines ──────────────────────────────
+    def _poll(self) -> None:
+        import queue as _q
+        try:
+            while True:
+                level, line = self._queue.get_nowait()
+                self._append(level, line)
+        except _q.Empty:
+            pass
+        except Exception:
+            pass
+        try:
+            if self.winfo_exists():
+                self.after(250, self._poll)
+        except Exception:
+            pass
+
+    def _append(self, level: str, line: str) -> None:
+        if not self._level_allowed(level):
+            return
+        try:
+            self._text.configure(state="normal")
+            self._text.insert("end", line + "\n", level)
+            self._line_count += 1
+            if self._line_count > self.MAX_LINES:
+                # Trim the oldest 200 lines so we don't grow unbounded.
+                self._text.delete("1.0", "200.0")
+                self._line_count -= 200
+            if self._auto_scroll:
+                self._text.see("end")
+            self._text.configure(state="disabled")
+        except Exception:
+            pass
+
+    def _level_allowed(self, level: str) -> bool:
+        try:
+            target_idx = self.LEVELS.index(self._filter_level)
+            this_idx   = self.LEVELS.index(level) if level in self.LEVELS else 1
+            return this_idx >= target_idx
+        except Exception:
+            return True
+
+    # ── Filter / actions ──────────────────────────────────────────────────
+    def _set_filter(self, level: str) -> None:
+        self._filter_level = level
+        self._refresh_filter_buttons()
+
+    def _refresh_filter_buttons(self) -> None:
+        for lvl, btn in self._filter_buttons.items():
+            if lvl == self._filter_level:
+                btn.configure(fg_color=C["accent_dim"],
+                              text_color=C["text"])
+            else:
+                btn.configure(fg_color=C["surface"],
+                              text_color=self._LEVEL_COLORS.get(lvl, C["text_mid"]))
+
+    def _copy_all(self) -> None:
+        try:
+            content = self._text.get("1.0", "end-1c")
+            self.clipboard_clear()
+            self.clipboard_append(content)
+            # Toast via the parent App if available.
+            top = self.winfo_toplevel()
+            if hasattr(top, "_toast"):
+                top._toast(f"📋 Logs copiados al portapapeles "
+                           f"({self._line_count} líneas)", "success")
+        except Exception:
+            pass
+
+    def _clear(self) -> None:
+        try:
+            self._text.configure(state="normal")
+            self._text.delete("1.0", "end")
+            self._text.configure(state="disabled")
+            self._line_count = 0
+        except Exception:
+            pass
+
+    def _open_folder(self) -> None:
+        try:
+            from utils.paths import logs_dir
+            _open_in_file_manager(Path(logs_dir()))
+        except Exception:
+            pass
+
+
+class _PanelLogHandler(logging.Handler):
+    """logging.Handler that pushes formatted records to a Queue.  The
+    LogsPanel polls the queue from the Tk thread so we never touch
+    widgets from background threads."""
+
+    _FMT = logging.Formatter(
+        "%(asctime)s [%(levelname)-5s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    def __init__(self, queue) -> None:
+        super().__init__()
+        self.queue = queue
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            line = self._FMT.format(record)
+            try:
+                self.queue.put_nowait((record.levelname, line))
+            except Exception:
+                pass
+        except Exception:
+            self.handleError(record)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Settings panel
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -3176,6 +3421,7 @@ class Sidebar(ctk.CTkFrame):
         ("search",    "🔍", "BUSCAR"),
         ("downloads", "↓",  "DESCARGAS"),
         ("history",   "≡",  "HISTORIAL"),
+        ("logs",      "▤",  "LOGS"),
         ("settings",  "⚙",  "AJUSTES"),
     ]
 
@@ -3436,12 +3682,14 @@ class DjTracksDwCrackApp:
             on_clear_history     = self._on_clear_history,
             on_clear_cover_cache = self._on_clear_cover_cache,
             on_reset_config      = self._on_reset_config)
+        self._logs_panel      = LogsPanel(self._content_area)
 
         self._panels = {
             "dashboard": self._dashboard_panel,
             "search":    self._search_panel,
             "downloads": self._download_panel,
             "history":   self._history_panel,
+            "logs":      self._logs_panel,
             "settings":  self._settings_panel,
         }
 
