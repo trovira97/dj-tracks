@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.cache/
+.cache
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Temp test scripts
+_*_test.py
+
+# Local dependencies installed by the launcher workflow
+.vendor/
+
+# App runtime output
+downloads/
+logs/
+
+# Build artifacts (PyInstaller + Inno Setup output)
+dist/
+build_temp/
+build_temp_final/
+final test/
+
+# Local user configuration / credentials  ← NEVER commit these
+config/settings.json
+config/history.json
+config/queue.json
+config/usage.json
+
+# Backend secrets + local db
+backend/.env
+backend/donors.db
+backend/donors.db-journal
+backend/__pycache__/
+backend/.venv/
+backend/_uvicorn*.log
+backend/_uvicorn*.err.log
+
+# Local backups
+*.bak
+
+# Large local binaries
+ffmpeg.exe
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,31 @@
+# Fly.io config for the DJ Tracks backend.
+# Generated once and then committed — fly deploy reads this on every push.
+
+app = "dj-tracks-trovira97"
+primary_region = "cdg"     # Paris — Madrid was deprecated by Fly
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"   # never sleep — webhook receivers must stay up
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+# Persistent volume — SQLite donor records live here so they survive
+# restarts and redeploys.  Created once with `fly volumes create dj_data`.
+[[mounts]]
+  source = "dj_data"
+  destination = "/data"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256        # plenty for this workload, stays in the free tier

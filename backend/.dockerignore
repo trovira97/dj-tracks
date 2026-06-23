@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.local
+donors.db
+donors.db-journal
+_uvicorn.log
+_uvicorn.err.log
+_test.py
+README.md
