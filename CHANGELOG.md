@@ -1,138 +1,153 @@
 # Changelog
 
 All notable changes to **DJ Tracks** are documented here.
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
+this project adheres to [Semantic Versioning](https://semver.org/).
+
+---
 
 ## [Unreleased]
 
-### Added — Audio quality and metadata pass
-- **TrackInfo** carries full album-aware metadata: `album_artist`,
-  `release_date` (full ISO), `track_number`, `disc_number`, `total_tracks`.
-- **AudioMetadata** (reader) reads `album_artist` and `disc_n` too.
-- **MP3 writer** now writes TRCK ("n/total"), TPOS, TPE2 (album artist),
-  and uses the full release_date in TDRC.
-- **FLAC writer** writes `albumartist`, `tracknumber`, `tracktotal`,
-  `discnumber`.
-- **M4A writer** writes `aART` (album artist), `trkn` ((n, total)), `disk`.
-- **verify_and_fix** also checks `album_artist` and `track_number`.
+### Architecture
+- Project-wide audit, MIT license added, this changelog brought up to date.
+- `CONTRIBUTING.md` documenting how to work on the codebase.
 
-### Changed — Maximum audio quality everywhere
-- **yt-dlp `format_sort`** added: `["acodec:flac", "acodec:wav",
-  "acodec:alac", "acodec:opus", "abr", "asr"]` — always selects the best
-  available stream by codec then bitrate then sample rate.
-- **YouTube fallback** now uses `ytmusicsearch1:` instead of `ytsearch1:`.
-  YT Music streams are higher quality (opus 160 kbps vs YT's typical
-  opus 128 / m4a 128) and search results are biased to official audio.
-- **Default quality profile** is now "Máxima calidad (original)" — no
-  re-encoding, keeps the source codec/bitrate intact (FLAC from Bandcamp,
-  opus from YT Music, etc.).
-- **Spotify cover** still 640×640 (max API serves) — full release_date
-  + track/disc number + album artist now extracted.
-- **Apple Music cover** bumped from 600×600 to **3000×3000bb** (max).
-- **SoundCloud cover** bumped from `-t500x500` to `-original`
-  (artist's source upload, no downscale).
-- **Bandcamp cover** bumped from `_10` (350×350) to `_0` (typically
-  1500×1500 original).
-- **Cover size limit** raised from 10 MB → 20 MB so high-res Apple /
-  Bandcamp artwork fits without being dropped.
+### UI / UX
+- New **Logs** panel in the sidebar: live, colour-coded view of the
+  app's logger with level filter, copy-to-clipboard and "open logs
+  folder" buttons.  Replaces the need to keep an external terminal
+  open while using the app.
+- **Mandatory Discord login** on first launch (DarkBot-style): the
+  app blocks the main UI until the user OAuth-links their Discord
+  account or quits.  Pre-linking everyone means donations later
+  don't need an OAuth step at all.
 
-### Added
-- **Bandcamp provider**: search, URL resolution, and direct download
-  (bypasses YouTube fallback). Uses the public `bcsearch_public_api`
-  endpoint — no credentials required. Bandcamp results appear alongside
-  Spotify / Apple Music / SoundCloud across the search, history,
-  dashboard, and download panels.
-- Bandcamp chip in the search filter row.
-- Bandcamp filter in the history panel.
-- Bandcamp bar in the dashboard platform breakdown.
-- Bandcamp colour (`bc = #629AA9`) added to every theme.
-- New `Platform.BANDCAMP` enum value + URL detection in `validators`.
-- 12 new pytest tests for the Bandcamp provider (offline, mocked HTTP).
-- 2 new tests covering Bandcamp URL detection in `detect_platform`.
+### Backend
+- Live Discord role check with cache fallback in `/usage/check`,
+  `/usage/record` and `/usage/link` — when an admin manually grants
+  the Donor role in Discord, the user's app unlocks automatically
+  on the next request, no webhook required.
+- Bot `on_member_update` listener mirrors Discord role changes
+  into the donors table in real time and DMs the recipient a
+  congratulatory message.
 
-### Changed
-- `AudioDownloader` now treats Bandcamp the same way as SoundCloud:
-  when the track has a `source_url`, hand it straight to yt-dlp instead
-  of doing a YouTube text search. Means cleaner downloads with the
-  original artist's audio.
-- `subfolder_per_platform` setting now produces a `Bandcamp/` sub-folder
-  too when enabled.
-- Friendly error messages for common yt-dlp failures (403, 404, 429,
-  age-restricted, geo-blocked, etc.) shown in the queue rows; full
-  traceback still goes to logs.
+---
 
-### Fixed
-- Toast crash on CustomTkinter >= 5.2: width/height moved from `.place()`
-  to the widget constructor.
+## [2.1.0] — 2026-06-22 — First public release
 
-### Added
-- **Standalone installer build pipeline** (`build/`):
-  - PyInstaller spec bundling ffmpeg, assets, and CustomTkinter data.
-  - Inno Setup installer script — per-user install, no admin required.
-  - One-click `build.bat` that runs the full pipeline.
-  - Full build README with troubleshooting.
-- `utils/paths.py` — central resolver for runtime data paths. In source
-  mode keeps the existing layout; in frozen mode (PyInstaller bundle)
-  redirects config / history / queue / logs to `%APPDATA%/DjTracks/`.
+### Added — Discord bot + donor flow
+- Persistent Discord bot (`backend/bot.py`) running alongside FastAPI
+  on the same Fly machine.  Three DM commands inspired by DarkBot:
+  - `!donate <amount>` — replies with an embed containing a
+    pre-filled Ko-fi URL and the donor's own Discord ID in a code
+    block, ready to paste into the Ko-fi message field.
+  - `!fixrole` — re-assigns the Donor role to users in our database
+    who lost it (left + rejoined the server, manual removal, etc.).
+  - `!help` — lists available commands.
 
-### Changed
-- `logger`, `controller`, `history_manager`, and `queue_persistence` now
-  resolve their paths via `utils.paths` so installed and source modes
-  both work correctly.
-- `main.py` skips the runtime pip bootstrap when running from a frozen
-  bundle (all deps are already inside).
-- GUI icon and ffmpeg lookup use `bundled_resource()` so they work both
-  in source mode and when extracted from the PyInstaller bundle.
+### Added — Server-authoritative freemium gate
+- New `usage` table keyed by `device_id` (UUID generated on first
+  run); the download counter lives on the backend so editing
+  `usage.json` locally doesn't reset it.
+- `POST /usage/check` returns `{allowed, remaining, is_donor}` based
+  on the server count; `/usage/record` bumps it; `/usage/link` binds
+  device → discord_id after OAuth.
+- Local client (`utils/donor_gate.py`) caches the verdict for 60 s
+  and falls back to a 24-hour offline shadow counter if the server
+  is unreachable, so a network blip doesn't lock the app.
 
-## [2.1.0] — 2026-06-01
+### Added — Ko-fi automated donor matching
+- `POST /kofi-webhook` with three matching paths in order:
+  1. Discord User ID embedded in the donation message → role
+     assigned via the Discord REST API instantly.
+  2. Email already linked from a prior OAuth → role assigned.
+  3. Otherwise stash in `pending_donations`; the next OAuth claims it
+     by Discord-registered email (we ask for the `email` scope).
+- Donor records survive container restarts via a persistent Fly volume.
 
-### Added
-- **Queue persistence**: pending downloads are saved on close and re-enqueued
-  on next launch (`config/queue.json`).
-- **History row actions**: double-click opens the file in the file manager;
-  right-click shows a context menu (open file, open folder, copy path).
-- **Track context menu**: right-click any search result to open it on its
-  source platform, copy the link, or copy the title.
-- **Double-click on download queue row**: opens the completed file.
-- **Environment-variable credentials**: `SPOTIFY_CLIENT_ID`,
-  `SPOTIFY_CLIENT_SECRET`, `SOUNDCLOUD_CLIENT_ID`, `APPLE_MUSIC_API_KEY`
-  override values in `settings.json`.
-- **Vinyl record icon** generated programmatically with PIL
-  (`assets/icon.ico` + `assets/logo.png`).
-- **Test suite** with pytest (`tests/`): validators, file utils, quality
-  manager, providers, history, queue persistence.
-- **`pyproject.toml`**: modern packaging configuration.
-- **Central version constant** (`__version__.py`).
-- **`CHANGELOG.md`**.
-- **More keyboard shortcuts**: Ctrl+D (Downloads), Ctrl+H (History),
-  Ctrl+Q (Quit).
+### Added — Beatport as primary metadata source
+- `metadata/beatport.py` scrapes Beatport's public `__NEXT_DATA__`
+  React-Query cache (no API key needed) and parses tracks into
+  `{title, mix, artists, remixers, bpm, key, camelot, genre,
+  publisher, year, isrc}`.
+- Camelot lookup that accepts both sharp and flat spellings
+  (`Bb Minor`, `A# Minor`, `Ab Minor`).
+- Fuzzy match via rapidfuzz with a 70-point floor and a soft artist
+  overlap gate.
+- On-disk cache (`<user_cache_dir>/DJ Tracks/beatport.json`):
+  positive results forever, negatives 7 days.  Cold lookup ~1.8 s,
+  warm lookup ~0 ms.
+- `enrich_files()` now runs Beatport → GetSongBPM → librosa.
+- `HistoryRow` gains a colour-coded source badge
+  (`BEATPORT` mint / `DB` muted / `LOCAL` dim).
 
-### Changed
-- **Concurrent downloads** via `ThreadPoolExecutor` (config `threads`, default 2).
-- **Concurrent search** across providers via `ThreadPoolExecutor`.
-- Vinyl icon replaces the placeholder app icon.
-- Sidebar version reads from the central `__version__` constant.
+### Added — YouTube as a first-class platform
+- `providers/youtube_provider.py` resolves any YouTube URL (single
+  video or playlist) into `TrackInfo` via yt-dlp's metadata
+  extraction; text search uses `ytsearchN:` so no API key is needed.
+- Best-effort `Artist - Title` split with `- Topic` channel
+  cleanup; falls back to uploader when the title has no
+  separator.
+- `utils.validators` recognises `youtube.com`, `youtu.be` and
+  `music.youtube.com`; `Platform.YOUTUBE` joins the direct-URL
+  fast path so pasted links download immediately.
 
-### Fixed
-- `AudioMetadata.artists` used mutable default `None` instead of
-  `field(default_factory=list)`.
-- Download cancellation now actually aborts active downloads via the
-  yt-dlp progress hook (previously the flag was set but never read).
-- Theme change rebuilds all panels so colours apply immediately.
-- Status bar updates after saving Settings.
-- Toast positioning is clamped to stay on-screen.
-- `get_unique_path()` has a 9 999 iteration cap with UUID fallback.
-- Windows reserved filenames (`CON`, `NUL`, `COM1`…) are prefixed with `_`.
-- Cover-art download validates `Content-Type` and rejects responses > 10 MB.
-- LRU-bounded cover cache (300 entries) replaces the unbounded dict.
-- `HistoryManager` is now thread-safe with snapshot-based persistence.
-- `_save()` no longer silences errors — logs `PermissionError` / `OSError`.
+### Added — Apple Music-style player
+- Persistent mini-player bar above the status bar with cover art,
+  scrubber, prev/next, volume, and an expanded "Now Playing"
+  window on cover click.
+- Queue derived from the current history page so prev/next walks
+  the visible list.
+- Auto-advance when a track ends and there's another queued.
+- Cover art read from embedded ID3 (APIC), MP4 (covr) and Vorbis
+  pictures; cached by raw-byte identity so state-change events
+  don't re-decode the image.
 
-### Security
-- `config/settings.json`, `config/history.json`, and `config/queue.json`
-  are now all in `.gitignore`.
-- Python 3.9+ version guard in `main.py` with a clear error message.
+### Added — Auto-update via GitHub Releases
+- `utils/app_updater.py` queries `api.github.com/repos/<repo>/
+  releases/latest`, compares semantic versions, and either swaps a
+  single `.exe` (PyInstaller `--onefile`) or extracts a `.zip`
+  bundle (`--onedir`) via a detached `robocopy /MIR` that takes
+  over after the running process exits.
+- Background check on startup with a toast notification when an
+  update is available.
 
-## [2.0.0] — Prior
+### Fixed — Broadened DRM detection
+- `is_drm_error` now catches the real-world SoundCloud failures
+  ("not currently available", "sign in to download", HLS+AES 403)
+  in addition to the literal "drm" keyword.
+- Classification operates on the **raw** yt-dlp error
+  (`task.error_raw`); the humanised Spanish message is no longer
+  the source of truth for the cross-platform retry decision.
 
-Initial multi-platform release with serial download worker.
+### Fixed — Geo-block retry never fired
+- `is_geo_error` was checking `"geo" in msg` against the humanised
+  Spanish message ("Bloqueado en tu región") and never matched.
+- Same brittleness fixed for age / private / premium classes.
+
+---
+
+## [Older history — pre v2.1.0]
+
+### Audio quality and metadata pass
+- `TrackInfo` carries full album-aware metadata: `album_artist`,
+  `release_date` (full ISO), `track_number`, `disc_number`,
+  `total_tracks`.
+- MP3 writer: TRCK ("n/total"), TPOS, TPE2 (album artist), full
+  release_date in TDRC.  FLAC writer: `albumartist`,
+  `tracknumber`, `tracktotal`, `discnumber`.  M4A writer: `aART`,
+  `trkn` ((n, total)), `disk`.
+- yt-dlp `format_sort`: `["acodec:flac", "acodec:wav",
+  "acodec:alac", "abr", "asr"]` — always picks the best stream by
+  codec then bitrate then sample rate.
+- YouTube fallback uses `ytmusicsearch1:` instead of `ytsearch1:`
+  for higher-quality streams biased to official audio.
+- Default quality profile: "Máxima calidad (original)" — no
+  re-encoding, keeps the source codec/bitrate intact.
+
+### DJ tooling
+- `metadata/dj_metadata.py` enrichment pipeline: GetSongBPM →
+  librosa fallback (kept as path 2 and 3 after Beatport).
+- Camelot wheel mapping, ReplayGain via ffmpeg ebur128, optional
+  acoustic-fingerprint deduplication and DJ filename renaming
+  (`Artist - Title [BPM - Camelot].ext`).

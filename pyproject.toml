@@ -1,28 +1,33 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires      = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name             = "dj-tracks-dw"
-version          = "2.1.0"
-description      = "Multi-platform music downloader with a DJ-style GUI (Spotify / Apple Music / SoundCloud)"
-readme           = "README.md"
-requires-python  = ">=3.9"
-license          = { text = "Personal use" }
-authors          = [{ name = "thiba" }]
-keywords         = ["music", "downloader", "spotify", "apple-music", "soundcloud", "yt-dlp"]
-classifiers      = [
-    "Development Status :: 4 - Beta",
+name            = "dj-tracks"
+version         = "2.1.0"
+description     = "Music downloader for DJs — Spotify, Apple Music, SoundCloud, Bandcamp, YouTube + Beatport metadata"
+readme          = "README.md"
+requires-python = ">=3.10"
+license         = { file = "LICENSE" }
+authors         = [{ name = "Thibaud Rovira", email = "thibaudrovira1997@gmail.com" }]
+urls            = { Homepage = "https://github.com/trovira97/dj-tracks", Issues = "https://github.com/trovira97/dj-tracks/issues" }
+keywords        = ["music", "downloader", "dj", "beatport", "camelot", "spotify",
+                   "apple-music", "soundcloud", "bandcamp", "youtube", "yt-dlp"]
+classifiers     = [
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Win32 (MS Windows)",
+    "Environment :: X11 Applications",
     "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: MacOS",
     "Operating System :: POSIX :: Linux",
-    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Multimedia :: Sound/Audio :: Capture/Recording",
 ]
 
 dependencies = [
@@ -42,6 +47,9 @@ dependencies = [
 dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
+    "ruff>=0.5.0",
+    "black>=24.0",
+    "mypy>=1.10",
 ]
 
 [project.scripts]
@@ -51,16 +59,58 @@ dj-tracks = "main:main"
 include = ["core*", "downloader*", "metadata*", "providers*", "ui*", "utils*"]
 
 [tool.pytest.ini_options]
-testpaths       = ["tests"]
-python_files    = ["test_*.py"]
-python_classes  = ["Test*"]
+testpaths        = ["tests"]
+python_files     = ["test_*.py"]
+python_classes   = ["Test*"]
 python_functions = ["test_*"]
-addopts         = "-v --tb=short"
+addopts          = "-v --tb=short"
 
+# ── Linting / formatting ───────────────────────────────────────────────────
 [tool.ruff]
-line-length = 110
-target-version = "py39"
+line-length    = 100
+target-version = "py310"
+extend-exclude = [".vendor", "build_temp", "dist", "final test", "backend/.venv"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "B", "UP"]
-ignore = ["E501"]   # long lines tolerated for UI strings / colour tuples
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RET", "PIE"]
+# E501 = line length (we let it go for UI strings + colour tuples)
+# B008 = function-call-in-default-arg (used by FastAPI on purpose)
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]               # asserts in tests are fine
+"main.py" = ["E402"]                # late imports are intentional
+
+[tool.black]
+line-length    = 100
+target-version = ["py310", "py311", "py312"]
+extend-exclude = '''
+/(
+    \.vendor
+  | build_temp
+  | dist
+  | final\ test
+  | backend/\.venv
+)/
+'''
+
+[tool.mypy]
+python_version           = "3.10"
+warn_unused_ignores      = true
+warn_redundant_casts     = true
+no_implicit_optional     = true
+check_untyped_defs       = true
+exclude                  = [".vendor", "build_temp", "dist", "final test", "backend/.venv"]
+
+[tool.coverage.run]
+branch       = true
+source       = ["core", "downloader", "metadata", "providers", "ui", "utils"]
+omit         = ["*/__pycache__/*", "*/.vendor/*", "tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

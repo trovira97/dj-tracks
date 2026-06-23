@@ -1,24 +1,39 @@
-# DJ Tracks
+<div align="center">
 
-[![Version](https://img.shields.io/github/v/release/trovira97/dj-tracks?style=flat-square)](https://github.com/trovira97/dj-tracks/releases/latest)
-[![Platform](https://img.shields.io/badge/platform-Windows-blue?style=flat-square)](https://github.com/trovira97/dj-tracks/releases/latest)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square)](https://www.python.org/)
+# 🎧 DJ Tracks
 
-> **Descargador de música pensado para DJs.** Pega un enlace de Spotify, Apple Music, SoundCloud, Bandcamp o YouTube y obtén el archivo en MP3/FLAC con metadatos completos: BPM, key (Camelot), género, sello, portada y ReplayGain — todo gracias a Beatport como fuente principal de metadata DJ.
+**Música para DJs sin fronteras**
+
+[![Release](https://img.shields.io/github/v/release/trovira97/dj-tracks?style=flat-square&color=00C8FF)](https://github.com/trovira97/dj-tracks/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-00C8FF.svg?style=flat-square)](./LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows-0d1117?style=flat-square)](https://github.com/trovira97/dj-tracks/releases/latest)
+[![Python](https://img.shields.io/badge/python-3.10%2B-0d1117?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![Discord](https://img.shields.io/discord/1518622366601838602?style=flat-square&logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gg/cNkh8Yd2A7)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white)](https://ko-fi.com/trovira_97)
+
+*Pega un enlace de Spotify, Apple Music, SoundCloud, Bandcamp o YouTube*
+*y obtén el archivo en MP3/FLAC con metadatos Beatport completos:*
+*BPM · key (Camelot) · género · sello · portada · ReplayGain*
+
+</div>
 
 ---
 
 ## ✨ Características
 
-- **5 plataformas en una app** — Spotify · Apple Music · SoundCloud · Bandcamp · YouTube
-- **Metadatos curados** — Beatport (BPM/key/Camelot/sello/género) como fuente primaria, con caché en disco; GetSongBPM y `librosa` como fallback
-- **Reproductor estilo Apple Music** — portada del álbum, scrubber, prev/next, vista expandida, cola integrada con el historial
-- **Búsqueda multi-plataforma simultánea** — un solo query, resultados de todas las fuentes en paralelo
-- **Cross-platform retry** — si una descarga falla por DRM/restricción, busca la misma canción en otras plataformas automáticamente
-- **Auto-update integrado** — chequeo automático al arrancar contra GitHub Releases, descarga e instalación con un click desde Ajustes
-- **Calidad máxima** — mantiene el codec original cuando es posible (FLAC de Bandcamp, opus de YouTube Music, etc.)
-- **Detección y des-duplicación** — fingerprinting acústico opcional para evitar bajar dos veces el mismo track
-- **Renombrado DJ opcional** — `Artist - Title [128 - 8A].mp3` listo para Rekordbox / Serato
+| | |
+|---|---|
+| 🎵 **5 plataformas en una app** | Spotify · Apple Music · SoundCloud · Bandcamp · YouTube |
+| 🎚️ **Metadata curada** | Beatport (BPM/key/Camelot/sello/género) primario, con caché en disco; GetSongBPM y `librosa` de fallback |
+| 🎧 **Reproductor estilo Apple Music** | Portada del álbum, scrubber, prev/next, vista expandida, cola integrada con el historial |
+| 🔍 **Búsqueda multi-plataforma simultánea** | Un solo query, resultados de todas las fuentes en paralelo |
+| 🔁 **Cross-platform retry** | Si una descarga falla por DRM/restricción, busca la misma canción en otras plataformas automáticamente |
+| 🆕 **Auto-update integrado** | Chequeo automático al arrancar contra GitHub Releases, descarga e instalación con un click desde Ajustes |
+| 💎 **Calidad máxima** | Mantiene el codec original cuando es posible (FLAC de Bandcamp, opus de YouTube Music, etc.) |
+| 🔁 **Acoustic dedup** | Fingerprinting opcional para evitar bajar dos veces el mismo track aunque tengan distinto título |
+| 🏷️ **Renombrado DJ** | `Artist - Title [128 - 8A].mp3` listo para Rekordbox / Serato |
+| 🤖 **Bot Discord** | `!donate <€>` te genera un enlace Ko-fi personalizado, `!fixrole` restaura roles, todo en DMs |
+| 📜 **Panel Logs in-app** | Salida del sistema en vivo, sin terminales externas |
 
 ## 📥 Instalación
 
