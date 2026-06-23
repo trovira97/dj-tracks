@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "dj-tracks"
-version         = "2.1.0"
+version         = "2.2.0"
 description     = "Music downloader for DJs — Spotify, Apple Music, SoundCloud, Bandcamp, YouTube + Beatport metadata"
 readme          = "README.md"
 requires-python = ">=3.10"
