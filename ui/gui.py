@@ -8,22 +8,23 @@ Python 3.10+  ·  CustomTkinter  ·  Pillow
 """
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
 import os
 import platform
 import subprocess
 import threading
+import tkinter as tk
 import webbrowser
 from collections import OrderedDict
+from collections.abc import Callable
 from pathlib import Path
 from tkinter import PhotoImage, filedialog
-from typing import Callable, Dict, List, Optional, Tuple
-import tkinter as tk
 
 import customtkinter as ctk
-from PIL import Image
 import requests
+from PIL import Image
 
 from __version__ import __app_name__, __app_subtitle__, __version__
 from core.controller import AppController
@@ -31,7 +32,6 @@ from downloader.audio_downloader import DownloadStatus, DownloadTask
 from providers import TrackInfo
 from utils.history_manager import HistoryManager
 from utils.paths import bundled_resource
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Platform-aware helpers
@@ -60,10 +60,8 @@ def _open_in_file_manager(path: Path) -> None:
 def _open_url(url: str) -> None:
     """Open *url* in the user's default browser."""
     if url:
-        try:
+        with contextlib.suppress(Exception):
             webbrowser.open(url, new=2)
-        except Exception:
-            pass
 
 
 def _copy_to_clipboard(root: ctk.CTk, text: str) -> None:
@@ -78,7 +76,7 @@ def _copy_to_clipboard(root: ctk.CTk, text: str) -> None:
 # Theme system
 # ─────────────────────────────────────────────────────────────────────────────
 
-THEMES: Dict[str, Dict[str, str]] = {
+THEMES: dict[str, dict[str, str]] = {
     "Dark Pro": {
         "bg": "#08080F", "sidebar": "#0B0B17", "panel": "#0F0F1D",
         "card": "#141426", "card_hover": "#1C1C38", "surface": "#17172C",
@@ -122,10 +120,10 @@ THEMES: Dict[str, Dict[str, str]] = {
 }
 
 # Active theme palette — updated by apply_theme().
-C: Dict[str, str] = dict(THEMES["Dark Pro"])
+C: dict[str, str] = dict(THEMES["Dark Pro"])
 
-PLATFORM_COLORS: Dict[str, str] = {}
-PLATFORM_LABELS: Dict[str, str] = {
+PLATFORM_COLORS: dict[str, str] = {}
+PLATFORM_LABELS: dict[str, str] = {
     "spotify":    "SPOTIFY",
     "applemusic": "APPLE MUSIC",
     "soundcloud": "SOUNDCLOUD",
@@ -170,18 +168,18 @@ class _LRUImageCache:
     """Thread-safe LRU cache for CTkImage objects, capped at *maxsize* entries."""
 
     def __init__(self, maxsize: int = 300) -> None:
-        self._cache: OrderedDict[Tuple[str, int], ctk.CTkImage] = OrderedDict()
+        self._cache: OrderedDict[tuple[str, int], ctk.CTkImage] = OrderedDict()
         self._maxsize = maxsize
         self._lock    = threading.Lock()
 
-    def get(self, key: Tuple[str, int]) -> Optional[ctk.CTkImage]:
+    def get(self, key: tuple[str, int]) -> ctk.CTkImage | None:
         with self._lock:
             if key in self._cache:
                 self._cache.move_to_end(key)
                 return self._cache[key]
         return None
 
-    def put(self, key: Tuple[str, int], value: ctk.CTkImage) -> None:
+    def put(self, key: tuple[str, int], value: ctk.CTkImage) -> None:
         with self._lock:
             self._cache[key] = value
             self._cache.move_to_end(key)
@@ -201,7 +199,7 @@ class _LRUImageCache:
 _COVER_CACHE = _LRUImageCache(maxsize=300)
 
 
-def _hex_to_rgb(h: str) -> Tuple[int, int, int]:
+def _hex_to_rgb(h: str) -> tuple[int, int, int]:
     h = h.lstrip("#")
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
 
@@ -350,7 +348,7 @@ class Toast(ctk.CTkFrame):
 
     # Class-level registry of live toasts so multiple notifications stack
     # instead of overlapping in the same corner.
-    _active: List["Toast"] = []
+    _active: list[Toast] = []
 
     def __init__(self, root: ctk.CTk, message: str, kind: str = "info", ms: int = 2800):
         accent = {"info": C["accent"], "success": C["success"], "error": C["error"]}.get(kind, C["accent"])
@@ -438,7 +436,7 @@ class Toast(ctk.CTkFrame):
 class StatCard(ctk.CTkFrame):
     """Metric card: coloured left stripe + big number + label."""
 
-    def __init__(self, parent, value: str, label: str, color: Optional[str] = None, **kw):
+    def __init__(self, parent, value: str, label: str, color: str | None = None, **kw):
         color = color or C["accent"]
         super().__init__(parent, fg_color=C["card"], corner_radius=8, **kw)
 
@@ -454,7 +452,7 @@ class StatCard(ctk.CTkFrame):
         ctk.CTkLabel(body, text=label, font=_font(9), text_color=C["text_dim"],
                      anchor="w").pack(fill="x")
 
-    def update_value(self, value: str, color: Optional[str] = None) -> None:
+    def update_value(self, value: str, color: str | None = None) -> None:
         kw: dict = {"text": value}
         if color:
             kw["text_color"] = color
@@ -516,7 +514,7 @@ class TrackRow(ctk.CTkFrame, _TrackContextMenuMixin):
     checkbox and a distinct look for whole-album results."""
 
     def __init__(self, parent, track: TrackInfo, on_add: Callable,
-                 on_toggle: Optional[Callable] = None, **kw):
+                 on_toggle: Callable | None = None, **kw):
         super().__init__(parent, fg_color=C["card"], corner_radius=6, **kw)
         self._track   = track
         self._on_add  = on_add
@@ -620,7 +618,7 @@ class TrackCard(ctk.CTkFrame, _TrackContextMenuMixin):
     _CARD_H = 275
 
     def __init__(self, parent, track: TrackInfo, on_add: Callable,
-                 on_toggle: Optional[Callable] = None, **kw):
+                 on_toggle: Callable | None = None, **kw):
         super().__init__(parent, fg_color=C["card"], corner_radius=8,
                          width=self._CARD_W, height=self._CARD_H,
                          border_width=1, border_color=C["card"], **kw)
@@ -755,10 +753,10 @@ class QueueRow(ctk.CTkFrame):
         super().__init__(parent, fg_color=C["card"], corner_radius=6, **kw)
         self._task     = task
         self._on_remove = on_remove
-        self._pbar: Optional[ctk.CTkProgressBar] = None
-        self._badge: Optional[StatusBadge] = None
-        self._path_lbl: Optional[ctk.CTkLabel] = None
-        self._err_lbl: Optional[ctk.CTkLabel] = None
+        self._pbar: ctk.CTkProgressBar | None = None
+        self._badge: StatusBadge | None = None
+        self._path_lbl: ctk.CTkLabel | None = None
+        self._err_lbl: ctk.CTkLabel | None = None
         self._build()
 
     def _build(self) -> None:
@@ -845,9 +843,9 @@ class HistoryRow(ctk.CTkFrame):
     """
 
     def __init__(self, parent, record,
-                 on_delete:     Optional[Callable] = None,
-                 on_redownload: Optional[Callable] = None,
-                 queue_paths:   Optional[list]     = None,
+                 on_delete:     Callable | None = None,
+                 on_redownload: Callable | None = None,
+                 queue_paths:   list | None     = None,
                  **kw):
         super().__init__(parent, fg_color=C["card"], corner_radius=5, **kw)
         self._record        = record
@@ -1047,9 +1045,9 @@ class DashboardPanel(ctk.CTkFrame):
     def __init__(self, parent, history: HistoryManager, **kw):
         super().__init__(parent, fg_color=C["panel"], corner_radius=0, **kw)
         self._history = history
-        self._cards: Dict[str, StatCard] = {}
-        self._plat_frame: Optional[ctk.CTkFrame] = None
-        self._recent_frame: Optional[ctk.CTkFrame] = None
+        self._cards: dict[str, StatCard] = {}
+        self._plat_frame: ctk.CTkFrame | None = None
+        self._recent_frame: ctk.CTkFrame | None = None
         self._build()
 
     def _build(self) -> None:
@@ -1169,11 +1167,11 @@ class SearchPanel(ctk.CTkFrame):
         super().__init__(parent, fg_color=C["panel"], corner_radius=0, **kw)
         self._ctrl         = controller
         self._on_add_track = on_add_track
-        self._results: List[ctk.CTkFrame] = []
-        self._last_results: List[TrackInfo] = []
+        self._results: list[ctk.CTkFrame] = []
+        self._last_results: list[TrackInfo] = []
         self._searching    = False
         self._platform_var = ctk.StringVar(value="auto")
-        self._chip_btns: Dict[str, ctk.CTkButton] = {}
+        self._chip_btns: dict[str, ctk.CTkButton] = {}
         self._build()
 
     def _build(self) -> None:
@@ -1381,7 +1379,7 @@ class SearchPanel(ctk.CTkFrame):
                 results = self._apply_duration_filter(results)
                 self.after(0, lambda: self._show_results(results))
             except Exception as exc:
-                self.after(0, lambda: self._status_lbl.configure(
+                self.after(0, lambda exc=exc: self._status_lbl.configure(
                     text=f"Error: {exc}", text_color=C["error"]))
             finally:
                 self.after(0, lambda: (
@@ -1390,7 +1388,7 @@ class SearchPanel(ctk.CTkFrame):
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _apply_duration_filter(self, results: List[TrackInfo]) -> List[TrackInfo]:
+    def _apply_duration_filter(self, results: list[TrackInfo]) -> list[TrackInfo]:
         def _to_ms(s: str) -> int:
             try:
                 m, sec = s.split(":")
@@ -1451,7 +1449,7 @@ class SearchPanel(ctk.CTkFrame):
             return f"{label} no disponible en este momento"
         return ""
 
-    def _show_results(self, results: List[TrackInfo]) -> None:
+    def _show_results(self, results: list[TrackInfo]) -> None:
         self._last_results = list(results)
         self._clear_results()
         if not results:
@@ -1612,14 +1610,14 @@ class SearchPanel(ctk.CTkFrame):
 
 class DownloadPanel(ctk.CTkFrame):
     def __init__(self, parent, controller: AppController, history: HistoryManager,
-                 on_count_change: Optional[Callable] = None,
-                 on_task_complete: Optional[Callable] = None, **kw):
+                 on_count_change: Callable | None = None,
+                 on_task_complete: Callable | None = None, **kw):
         super().__init__(parent, fg_color=C["panel"], corner_radius=0, **kw)
         self._ctrl            = controller
         self._history         = history
         self._on_count_change = on_count_change
         self._on_task_complete = on_task_complete
-        self._rows: Dict[str, QueueRow] = {}
+        self._rows: dict[str, QueueRow] = {}
         self._completed_ids: set = set()   # tracks for which we've already fired on_task_complete
         self._build()
 
@@ -1663,7 +1661,7 @@ class DownloadPanel(ctk.CTkFrame):
         """Called by the controller from a background thread."""
         self.after(0, lambda: self._update_ui(task))
 
-    def populate_from_existing(self, tasks: List[DownloadTask]) -> None:
+    def populate_from_existing(self, tasks: list[DownloadTask]) -> None:
         """Re-populate rows from an existing task list (e.g. after theme rebuild)."""
         for task in tasks:
             if task.task_id not in self._rows:
@@ -1689,10 +1687,8 @@ class DownloadPanel(ctk.CTkFrame):
         if task.status == DownloadStatus.DONE and task.task_id not in self._completed_ids:
             self._completed_ids.add(task.task_id)
             if self._on_task_complete:
-                try:
+                with contextlib.suppress(Exception):
                     self._on_task_complete(task)
-                except Exception:
-                    pass
 
         self._refresh_counter()
 
@@ -1754,8 +1750,8 @@ class HistoryPanel(ctk.CTkFrame):
     PAGE_SIZE = 40
 
     def __init__(self, parent, history: HistoryManager,
-                 on_dashboard_refresh: Optional[Callable] = None,
-                 on_redownload:        Optional[Callable] = None, **kw):
+                 on_dashboard_refresh: Callable | None = None,
+                 on_redownload:        Callable | None = None, **kw):
         super().__init__(parent, fg_color=C["panel"], corner_radius=0, **kw)
         self._history              = history
         self._on_dashboard_refresh = on_dashboard_refresh
@@ -1942,7 +1938,7 @@ class LogsPanel(ctk.CTkFrame):
     def __init__(self, parent, **kw):
         super().__init__(parent, fg_color=C["bg"], **kw)
         import queue as _q
-        self._queue: "_q.Queue[tuple[str, str]]" = _q.Queue(maxsize=5000)
+        self._queue: _q.Queue[tuple[str, str]] = _q.Queue(maxsize=5000)
         self._line_count = 0
         self._filter_level = "INFO"
         self._auto_scroll = True
@@ -2152,10 +2148,8 @@ class _PanelLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             line = self._FMT.format(record)
-            try:
+            with contextlib.suppress(Exception):
                 self.queue.put_nowait((record.levelname, line))
-            except Exception:
-                pass
         except Exception:
             self.handleError(record)
 
@@ -2166,11 +2160,11 @@ class _PanelLogHandler(logging.Handler):
 
 class SettingsPanel(ctk.CTkFrame):
     def __init__(self, parent, controller: AppController,
-                 on_save: Optional[Callable] = None,
-                 on_theme_change: Optional[Callable] = None,
-                 on_clear_history: Optional[Callable] = None,
-                 on_clear_cover_cache: Optional[Callable] = None,
-                 on_reset_config: Optional[Callable] = None,
+                 on_save: Callable | None = None,
+                 on_theme_change: Callable | None = None,
+                 on_clear_history: Callable | None = None,
+                 on_clear_cover_cache: Callable | None = None,
+                 on_reset_config: Callable | None = None,
                  **kw):
         super().__init__(parent, fg_color=C["panel"], corner_radius=0, **kw)
         self._ctrl                 = controller
@@ -2456,13 +2450,13 @@ class SettingsPanel(ctk.CTkFrame):
         cache_n = _COVER_CACHE.size()
         self._maint_button(
             maint_card,
-            label=f"Crear acceso directo en el escritorio",
+            label="Crear acceso directo en el escritorio",
             hint="Acceso rápido a DJ Tracks en tu escritorio (Win/Mac/Linux)",
             command=self._handle_create_shortcut)
         Divider(maint_card).pack(fill="x", padx=14, pady=2)
         self._maint_button(
             maint_card,
-            label=f"Limpiar caché de imágenes",
+            label="Limpiar caché de imágenes",
             hint=f"Libera la memoria usada por las {cache_n} portadas en caché",
             command=self._handle_clear_cache)
         Divider(maint_card).pack(fill="x", padx=14, pady=2)
@@ -2552,6 +2546,7 @@ class SettingsPanel(ctk.CTkFrame):
         """Check GitHub Releases for a newer DJ Tracks build and offer
         to download + install it."""
         from tkinter import messagebox
+
         from utils import app_updater
 
         top = self.winfo_toplevel()
@@ -2641,7 +2636,6 @@ class SettingsPanel(ctk.CTkFrame):
 
     def _handle_update_ytdlp(self) -> None:
         """Check PyPI and upgrade yt-dlp if a newer version is available."""
-        from tkinter import messagebox
 
         def _worker() -> None:
             result = self._ctrl.update_ytdlp()
@@ -2897,10 +2891,10 @@ class PlayerBar(ctk.CTkFrame):
                          corner_radius=0, **kw)
         self.pack_propagate(False)
         self._seeking = False
-        self._tick_id: Optional[str] = None
-        self._cover_cache_key: Optional[bytes] = None
-        self._cover_img: Optional[ctk.CTkImage] = None
-        self._placeholder_img: Optional[ctk.CTkImage] = None
+        self._tick_id: str | None = None
+        self._cover_cache_key: bytes | None = None
+        self._cover_img: ctk.CTkImage | None = None
+        self._placeholder_img: ctk.CTkImage | None = None
         self._build()
         self._hide()
 
@@ -2925,7 +2919,7 @@ class PlayerBar(ctk.CTkFrame):
             cursor="hand2")
         self._cover_lbl.place(relx=0.5, rely=0.5, anchor="center")
         self._cover_lbl.bind("<Button-1>", lambda _e: self._open_now_playing())
-        self._now_playing_win: Optional["NowPlayingWindow"] = None
+        self._now_playing_win: NowPlayingWindow | None = None
 
         # ── Right: volume ───────────────────────────────────────────────────
         right = ctk.CTkFrame(self, fg_color="transparent", width=140)
@@ -3064,10 +3058,8 @@ class PlayerBar(ctk.CTkFrame):
 
     # ── State sync ──────────────────────────────────────────────────────────
     def _on_player_state(self) -> None:
-        try:
+        with contextlib.suppress(Exception):
             self.after(0, self._refresh)
-        except Exception:
-            pass
 
     def _refresh(self) -> None:
         from utils.audio_player import AudioPlayer
@@ -3089,15 +3081,13 @@ class PlayerBar(ctk.CTkFrame):
         self._prev_btn.configure(state="normal" if player.has_prev else "disabled")
         self._next_btn.configure(state="normal" if player.has_next else "disabled")
         # Volume slider stays in sync if changed programmatically
-        try:
+        with contextlib.suppress(Exception):
             self._vol.set(int(player.volume * 100))
-        except Exception:
-            pass
         dur = player.duration
         self._total.configure(text=_fmt_mmss(dur) if dur > 0 else "--:--")
         self._start_tick()
 
-    def _refresh_cover(self, data: Optional[bytes]) -> None:
+    def _refresh_cover(self, data: bytes | None) -> None:
         """Update the cover image; cache by raw bytes identity so we don't
         re-decode on every state change."""
         if data is self._cover_cache_key and self._cover_img is not None:
@@ -3109,6 +3099,7 @@ class PlayerBar(ctk.CTkFrame):
             return
         try:
             import io
+
             from PIL import Image
             img = Image.open(io.BytesIO(data)).convert("RGB")
             img.thumbnail((self.COVER_SIZE * 2, self.COVER_SIZE * 2),
@@ -3129,10 +3120,8 @@ class PlayerBar(ctk.CTkFrame):
 
     def _stop_tick(self) -> None:
         if self._tick_id is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.after_cancel(self._tick_id)
-            except Exception:
-                pass
             self._tick_id = None
 
     def _tick(self) -> None:
@@ -3181,15 +3170,13 @@ class NowPlayingWindow(ctk.CTkToplevel):
         self.geometry("520x720")
         self.minsize(440, 640)
         self.configure(fg_color=C["bg"])
-        try:
+        with contextlib.suppress(Exception):
             self.transient(parent)
-        except Exception:
-            pass
 
         self._seeking = False
-        self._tick_id: Optional[str] = None
-        self._cover_cache_key: Optional[bytes] = None
-        self._cover_img: Optional[ctk.CTkImage] = None
+        self._tick_id: str | None = None
+        self._cover_cache_key: bytes | None = None
+        self._cover_img: ctk.CTkImage | None = None
         self._build()
         self.bind("<Escape>", lambda _e: self.destroy())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -3349,15 +3336,13 @@ class NowPlayingWindow(ctk.CTkToplevel):
         self._pp_btn.configure(text="⏸" if not player.paused else "▶")
         self._prev_btn.configure(state="normal" if player.has_prev else "disabled")
         self._next_btn.configure(state="normal" if player.has_next else "disabled")
-        try:
+        with contextlib.suppress(Exception):
             self._vol.set(int(player.volume * 100))
-        except Exception:
-            pass
         dur = player.duration
         self._total.configure(text=_fmt_mmss(dur) if dur > 0 else "--:--")
         self._start_tick()
 
-    def _refresh_cover(self, data: Optional[bytes]) -> None:
+    def _refresh_cover(self, data: bytes | None) -> None:
         if data is self._cover_cache_key and self._cover_img is not None:
             return
         self._cover_cache_key = data
@@ -3367,6 +3352,7 @@ class NowPlayingWindow(ctk.CTkToplevel):
             return
         try:
             import io
+
             from PIL import Image
             img = Image.open(io.BytesIO(data)).convert("RGB")
             img.thumbnail((self.COVER_SIZE * 2, self.COVER_SIZE * 2),
@@ -3407,10 +3393,8 @@ class NowPlayingWindow(ctk.CTkToplevel):
 
     def _on_close(self) -> None:
         if self._tick_id is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.after_cancel(self._tick_id)
-            except Exception:
-                pass
             self._tick_id = None
         self.destroy()
 
@@ -3431,7 +3415,7 @@ class Sidebar(ctk.CTkFrame):
         self.pack_propagate(False)
         self._on_navigate = on_navigate
         self._active = ""
-        self._items: Dict[str, _NavItem] = {}
+        self._items: dict[str, _NavItem] = {}
         self._build()
 
     def _build(self) -> None:
@@ -3522,13 +3506,11 @@ class DjTracksDwCrackApp:
         else:
             self._root.geometry(self.APP_GEOMETRY)
         if saved_state == "zoomed":
-            try:
+            with contextlib.suppress(Exception):
                 self._root.state("zoomed")
-            except Exception:
-                pass
 
-        self._panels: Dict[str, ctk.CTkFrame] = {}
-        self._content_area: Optional[ctk.CTkFrame] = None
+        self._panels: dict[str, ctk.CTkFrame] = {}
+        self._content_area: ctk.CTkFrame | None = None
 
         self._set_icon()
         self._build()
@@ -3784,7 +3766,7 @@ class DjTracksDwCrackApp:
                 if not results and record.platform:
                     results = self._ctrl.search(query, platform_str="auto", limit=1)
             except Exception as exc:
-                self._root.after(0, lambda: self._toast(
+                self._root.after(0, lambda exc=exc: self._toast(
                     f"Error en la búsqueda: {exc}", "error"))
                 return
 
@@ -3974,14 +3956,14 @@ class LockoutDialog(ctk.CTkToplevel):
             self.grab_set()
         except Exception:
             pass
-        self._poll_id: Optional[str] = None
+        self._poll_id: str | None = None
         self._oauth_token: str = ""
         self._build()
         self.bind("<Escape>", lambda _e: self._close())
         self.protocol("WM_DELETE_WINDOW", self._close)
 
     def _build(self) -> None:
-        from utils.donor_gate import get_state, FREE_LIMIT
+        from utils.donor_gate import FREE_LIMIT, get_state
         st = get_state()
 
         body = ctk.CTkFrame(self, fg_color="transparent")
@@ -4037,6 +4019,7 @@ class LockoutDialog(ctk.CTkToplevel):
 
     def _donate(self) -> None:
         import webbrowser
+
         from utils.donor_client import kofi_url
         webbrowser.open(kofi_url())
         self._status_lbl.configure(
@@ -4045,6 +4028,7 @@ class LockoutDialog(ctk.CTkToplevel):
 
     def _link_discord(self) -> None:
         import uuid
+
         from utils import donor_client
         self._oauth_token = uuid.uuid4().hex
         opened = donor_client.open_oauth_flow(self._oauth_token)
@@ -4090,15 +4074,11 @@ class LockoutDialog(ctk.CTkToplevel):
 
     def _close(self) -> None:
         if self._poll_id is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.after_cancel(self._poll_id)
-            except Exception:
-                pass
             self._poll_id = None
-        try:
+        with contextlib.suppress(Exception):
             self.grab_release()
-        except Exception:
-            pass
         self.destroy()
 
 
@@ -4123,7 +4103,7 @@ class StartupLoginScreen(ctk.CTkToplevel):
             self.grab_set()       # blocks the main window
         except Exception:
             pass
-        self._poll_id: Optional[str] = None
+        self._poll_id: str | None = None
         self._oauth_token: str = ""
         self._build()
         # ESC closes the whole app (same as the X), no quiet dismiss.
@@ -4197,6 +4177,7 @@ class StartupLoginScreen(ctk.CTkToplevel):
     # ── Actions ─────────────────────────────────────────────────────────────
     def _login(self) -> None:
         import uuid
+
         from utils import donor_client
         self._oauth_token = uuid.uuid4().hex
         opened = donor_client.open_oauth_flow(self._oauth_token)
@@ -4249,13 +4230,9 @@ class StartupLoginScreen(ctk.CTkToplevel):
 
     def _close(self) -> None:
         if self._poll_id is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.after_cancel(self._poll_id)
-            except Exception:
-                pass
             self._poll_id = None
-        try:
+        with contextlib.suppress(Exception):
             self.grab_release()
-        except Exception:
-            pass
         self.destroy()

@@ -14,13 +14,11 @@ import csv
 import json
 import threading
 import uuid
-from datetime import datetime, date
+from datetime import date, datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 from utils.logger import log
-from utils.paths  import config_dir
-
+from utils.paths import config_dir
 
 HISTORY_PATH = config_dir() / "history.json"
 
@@ -65,11 +63,11 @@ class DownloadRecord:
         self.error           = error
         self.metadata_source = metadata_source
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {k: getattr(self, k) for k in self.__slots__}
 
     @classmethod
-    def from_dict(cls, d: Dict) -> "DownloadRecord":
+    def from_dict(cls, d: dict) -> DownloadRecord:
         return cls(
             title       = d.get("title", ""),
             artist      = d.get("artist", ""),
@@ -101,7 +99,7 @@ class HistoryManager:
     """
 
     def __init__(self) -> None:
-        self._records: List[DownloadRecord] = []
+        self._records: list[DownloadRecord] = []
         self._lock = threading.Lock()
         self._load()
 
@@ -119,7 +117,7 @@ class HistoryManager:
             log.error(f"[History] No se pudo cargar el historial: {exc}")
             self._records = []
 
-    def _save_snapshot(self, records: List[DownloadRecord]) -> None:
+    def _save_snapshot(self, records: list[DownloadRecord]) -> None:
         """Persist *records* atomically.  Called outside the lock."""
         from utils.atomic_io import atomic_write_json
         try:
@@ -167,7 +165,7 @@ class HistoryManager:
 
     # ── Read ──────────────────────────────────────────────────────────────────
 
-    def all(self) -> List[DownloadRecord]:
+    def all(self) -> list[DownloadRecord]:
         with self._lock:
             return list(self._records)
 
@@ -178,7 +176,7 @@ class HistoryManager:
         status: str = "",
         page: int = 0,
         page_size: int = 50,
-    ) -> Tuple[List[DownloadRecord], int]:
+    ) -> tuple[list[DownloadRecord], int]:
         """
         Return ``(records_page, total_count)`` filtered by query / platform / status.
         """
@@ -199,7 +197,7 @@ class HistoryManager:
 
     # ── Statistics ─────────────────────────────────────────────────────────────
 
-    def stats(self) -> Dict:
+    def stats(self) -> dict:
         """Return aggregated statistics (thread-safe snapshot)."""
         with self._lock:
             records = list(self._records)
@@ -210,7 +208,7 @@ class HistoryManager:
         today_n     = sum(1 for r in records if r.date_str == today)
         success_pct = round(done / total * 100) if total else 0
 
-        plat_count: Dict[str, int] = {}
+        plat_count: dict[str, int] = {}
         for r in records:
             plat_count[r.platform] = plat_count.get(r.platform, 0) + 1
 
@@ -223,7 +221,7 @@ class HistoryManager:
             "by_platform": plat_count,
         }
 
-    def recent(self, n: int = 5) -> List[DownloadRecord]:
+    def recent(self, n: int = 5) -> list[DownloadRecord]:
         with self._lock:
             return self._records[:n]
 

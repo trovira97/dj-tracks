@@ -1,0 +1,27 @@
+name: 💡 Feature / idea
+description: Propón una mejora o una funcionalidad nueva
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema que resuelve
+      description: ¿Qué te falta hoy? ¿Qué fricción notas?
+      placeholder: |
+        Cuando intento X, tengo que hacer Y manualmente, y es pesado porque...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Propuesta
+      description: ¿Cómo te imaginas la solución?
+      placeholder: |
+        Sería ideal que la app...
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas consideradas
+      description: ¿Has visto algo parecido en otra app? ¿Hay workaround actual?

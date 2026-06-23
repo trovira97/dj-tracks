@@ -8,15 +8,14 @@ port automatically — no stale lock to clean up.
 """
 from __future__ import annotations
 
+import contextlib
 import socket
-from typing import Optional
-
 
 # Port chosen at random in the IANA dynamic range; unlikely to collide.
 _PORT = 19_847
 _HOST = "127.0.0.1"
 
-_sock: Optional[socket.socket] = None
+_sock: socket.socket | None = None
 
 
 def acquire() -> bool:
@@ -43,8 +42,6 @@ def release() -> None:
     """Release the lock (called automatically at shutdown)."""
     global _sock
     if _sock is not None:
-        try:
+        with contextlib.suppress(Exception):
             _sock.close()
-        except Exception:
-            pass
         _sock = None

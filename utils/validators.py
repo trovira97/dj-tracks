@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import re
 from enum import Enum
-from typing import Optional
 
 
 class Platform(str, Enum):
@@ -107,7 +106,7 @@ def is_valid_url(url: str) -> bool:
     return url.startswith(("http://", "https://"))
 
 
-def extract_spotify_id(url: str) -> Optional[str]:
+def extract_spotify_id(url: str) -> str | None:
     """
     Extract the Spotify resource ID from a URL.
 

@@ -9,16 +9,17 @@ Settings — modelled on the donations modal so it matches every theme.
 """
 from __future__ import annotations
 
+import contextlib
 import webbrowser
-from typing import Callable, Dict, Optional
+from collections.abc import Callable
 
 import customtkinter as ctk
 
 _DASHBOARD = "https://developer.spotify.com/dashboard"
 
 
-def show_setup_wizard(root, palette: Dict[str, str],
-                      on_open_settings: Optional[Callable] = None) -> None:
+def show_setup_wizard(root, palette: dict[str, str],
+                      on_open_settings: Callable | None = None) -> None:
     """
     Open the setup wizard on top of *root* using the active *palette*.
 
@@ -48,7 +49,7 @@ def show_setup_wizard(root, palette: Dict[str, str],
                                   scrollbar_button_color=C["border"])
     body.pack(fill="both", expand=True, padx=18, pady=(8, 4))
 
-    def _section(title: str, color: Optional[str] = None) -> None:
+    def _section(title: str, color: str | None = None) -> None:
         ctk.CTkLabel(body, text=title, font=ctk.CTkFont(size=11, weight="bold"),
                      text_color=color or C["accent"], anchor="w").pack(
                          fill="x", pady=(12, 4))
@@ -133,7 +134,5 @@ def show_setup_wizard(root, palette: Dict[str, str],
 
 
 def _open(url: str) -> None:
-    try:
+    with contextlib.suppress(Exception):
         webbrowser.open(url, new=2)
-    except Exception:
-        pass

@@ -9,7 +9,6 @@ own JavaScript assets when none is configured.
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
 
 import requests
 
@@ -82,7 +81,7 @@ class SoundCloudProvider(MusicProvider):
             log.warning(f"[SoundCloud] No se pudo obtener client_id: {exc}")
         return False
 
-    def _api(self, path: str, params: Optional[Dict] = None) -> Optional[dict]:
+    def _api(self, path: str, params: dict | None = None) -> dict | None:
         if not self._ensure_client_id():
             return None
         p = dict(params or {})
@@ -97,7 +96,7 @@ class SoundCloudProvider(MusicProvider):
 
     # ── Conversion ────────────────────────────────────────────────────────────
 
-    def _to_info(self, t: dict) -> Optional[TrackInfo]:
+    def _to_info(self, t: dict) -> TrackInfo | None:
         """Convert a SoundCloud API track dict to :class:`TrackInfo`."""
         if not isinstance(t, dict) or not t:
             return None
@@ -141,7 +140,7 @@ class SoundCloudProvider(MusicProvider):
 
     # ── MusicProvider ─────────────────────────────────────────────────────────
 
-    def search(self, query: str, limit: int = 10) -> List[TrackInfo]:
+    def search(self, query: str, limit: int = 10) -> list[TrackInfo]:
         try:
             data  = self._api("/search/tracks", {"q": query, "limit": limit})
             items = (data or {}).get("collection", [])
@@ -150,7 +149,7 @@ class SoundCloudProvider(MusicProvider):
             log.error(f"[SoundCloud] Error en búsqueda: {exc}")
             return []
 
-    def search_albums(self, query: str, limit: int = 10) -> List[TrackInfo]:
+    def search_albums(self, query: str, limit: int = 10) -> list[TrackInfo]:
         """Search SoundCloud sets/playlists.  The set URL resolves to all its
         tracks via :meth:`get_tracks_from_url`."""
         try:
@@ -159,7 +158,7 @@ class SoundCloudProvider(MusicProvider):
         except Exception as exc:
             log.error(f"[SoundCloud] Error en búsqueda de álbumes: {exc}")
             return []
-        out: List[TrackInfo] = []
+        out: list[TrackInfo] = []
         for pl in items[:limit]:
             if not isinstance(pl, dict):
                 continue
@@ -178,7 +177,7 @@ class SoundCloudProvider(MusicProvider):
             ))
         return out
 
-    def get_track(self, url_or_id: str) -> Optional[TrackInfo]:
+    def get_track(self, url_or_id: str) -> TrackInfo | None:
         try:
             if url_or_id.startswith("http"):
                 data = self._api("/resolve", {"url": url_or_id})
@@ -189,7 +188,7 @@ class SoundCloudProvider(MusicProvider):
             log.error(f"[SoundCloud] Error al obtener track: {exc}")
             return None
 
-    def get_tracks_from_url(self, url: str) -> List[TrackInfo]:
+    def get_tracks_from_url(self, url: str) -> list[TrackInfo]:
         try:
             resource = self._api("/resolve", {"url": url})
             if not isinstance(resource, dict):

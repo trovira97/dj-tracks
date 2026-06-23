@@ -1,0 +1,70 @@
+name: 🐛 Bug report
+description: Algo no funciona como debería
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por reportar. Cuanto más detalle, más rápido lo arreglo.
+        Antes de seguir, comprueba que no hay un issue parecido en
+        [los existentes](../issues?q=is%3Aissue).
+
+  - type: input
+    id: version
+    attributes:
+      label: Versión de DJ Tracks
+      description: Está en **Ajustes → "Buscar actualizaciones de DJ Tracks · v…"** o en la sidebar (abajo)
+      placeholder: "v2.2.0"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Sistema operativo
+      placeholder: "Windows 11 24H2"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Qué pasó
+      description: Qué intentabas hacer y qué viste en su lugar
+      placeholder: |
+        Cuando intento descargar X, sale Y.
+        Esperaba que pasase Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Pasos para reproducir
+      description: Minimal repro — los pasos exactos que llevan al bug
+      placeholder: |
+        1. Abro la app
+        2. Pego https://...
+        3. Pulso Añadir
+        4. Sale el error en la cola
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Abre **LOGS** en la sidebar de la app → filtra por **ERROR** o **WARNING** → pulsa **📋 Copiar todo** → pega aquí.
+        Si crees que hay info sensible (rutas con tu nombre, etc.), redacta.
+      render: text
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Confirmación
+      options:
+        - label: He buscado y no hay un issue parecido ya abierto
+          required: true
+        - label: Estoy en la última versión disponible
+          required: true

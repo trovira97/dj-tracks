@@ -18,7 +18,6 @@ can hand it directly to yt-dlp (no YouTube fallback needed).
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
 
 import requests
 
@@ -66,7 +65,7 @@ class BandcampProvider(MusicProvider):
 
     # ── Conversion ────────────────────────────────────────────────────────────
 
-    def _result_to_info(self, r: dict) -> Optional[TrackInfo]:
+    def _result_to_info(self, r: dict) -> TrackInfo | None:
         """Convert one Bandcamp search-result item to :class:`TrackInfo`."""
         if not isinstance(r, dict):
             return None
@@ -106,7 +105,7 @@ class BandcampProvider(MusicProvider):
 
     # ── MusicProvider ─────────────────────────────────────────────────────────
 
-    def search(self, query: str, limit: int = 10) -> List[TrackInfo]:
+    def search(self, query: str, limit: int = 10) -> list[TrackInfo]:
         if not query.strip():
             return []
         payload = {
@@ -125,7 +124,7 @@ class BandcampProvider(MusicProvider):
 
         # Response shape: {"auto": {"results": [...]}}
         results = (data.get("auto") or {}).get("results") or []
-        tracks: List[TrackInfo] = []
+        tracks: list[TrackInfo] = []
         for r in results[:limit]:
             # Only keep track items; the API can leak through albums / bands
             # depending on its mood.
@@ -136,7 +135,7 @@ class BandcampProvider(MusicProvider):
                 tracks.append(info)
         return tracks
 
-    def search_albums(self, query: str, limit: int = 10) -> List[TrackInfo]:
+    def search_albums(self, query: str, limit: int = 10) -> list[TrackInfo]:
         """Search Bandcamp albums (search_filter='a').  The album URL resolves
         to all its tracks via :meth:`get_tracks_from_url`."""
         payload = {"search_text": query, "search_filter": "a",
@@ -149,7 +148,7 @@ class BandcampProvider(MusicProvider):
             log.error(f"[Bandcamp] Error en búsqueda de álbumes: {exc}")
             return []
         results = (data.get("auto") or {}).get("results") or []
-        out: List[TrackInfo] = []
+        out: list[TrackInfo] = []
         for r in results[:limit]:
             if r.get("type") and r.get("type") != "a":
                 continue
@@ -160,7 +159,7 @@ class BandcampProvider(MusicProvider):
                 out.append(info)
         return out
 
-    def get_track(self, url_or_id: str) -> Optional[TrackInfo]:
+    def get_track(self, url_or_id: str) -> TrackInfo | None:
         """Bandcamp identifiers are URLs; trying to ``GET`` a bare ID isn't useful."""
         if not url_or_id.startswith("http"):
             return None
@@ -173,7 +172,7 @@ class BandcampProvider(MusicProvider):
             platform   = "bandcamp",
         )
 
-    def get_tracks_from_url(self, url: str) -> List[TrackInfo]:
+    def get_tracks_from_url(self, url: str) -> list[TrackInfo]:
         """
         Resolve a Bandcamp URL.
 

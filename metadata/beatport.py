@@ -23,7 +23,6 @@ import os
 import re
 import threading
 import time
-from typing import Optional
 
 log = logging.getLogger("dj_tracks.beatport")
 
@@ -33,8 +32,8 @@ log = logging.getLogger("dj_tracks.beatport")
 # don't hammer Beatport every retry for tracks they don't have.
 
 _CACHE_LOCK = threading.Lock()
-_CACHE: Optional[dict] = None
-_CACHE_PATH: Optional[str] = None
+_CACHE: dict | None = None
+_CACHE_PATH: str | None = None
 _NEG_TTL_SEC = 7 * 24 * 3600
 
 
@@ -57,7 +56,7 @@ def _load_cache() -> dict:
     if _CACHE is not None:
         return _CACHE
     try:
-        with open(_cache_path(), "r", encoding="utf-8") as fh:
+        with open(_cache_path(), encoding="utf-8") as fh:
             _CACHE = json.load(fh) or {}
     except Exception:
         _CACHE = {}
@@ -81,7 +80,7 @@ def _cache_key(artist: str, title: str) -> str:
     return f"{(artist or '').strip().lower()}|{(title or '').strip().lower()}"
 
 
-def _cache_get(key: str) -> tuple[bool, Optional[dict]]:
+def _cache_get(key: str) -> tuple[bool, dict | None]:
     """Return (hit, value).  value is None for a cached negative."""
     with _CACHE_LOCK:
         entry = _load_cache().get(key)
@@ -95,7 +94,7 @@ def _cache_get(key: str) -> tuple[bool, Optional[dict]]:
     return True, entry["data"]
 
 
-def _cache_put(key: str, value: Optional[dict]) -> None:
+def _cache_put(key: str, value: dict | None) -> None:
     with _CACHE_LOCK:
         _load_cache()[key] = {"data": value, "t": int(time.time())}
         _save_cache()
@@ -120,7 +119,7 @@ _NEXT_DATA_RE = re.compile(
 # "A" for minor, "B" for major.  Their own JSON already includes both.
 
 
-def _http_get(url: str, session=None, timeout: float = 8.0) -> Optional[str]:
+def _http_get(url: str, session=None, timeout: float = 8.0) -> str | None:
     try:
         import requests
         s = session if session is not None else requests
@@ -133,7 +132,7 @@ def _http_get(url: str, session=None, timeout: float = 8.0) -> Optional[str]:
     return None
 
 
-def _extract_next_data(html: str) -> Optional[dict]:
+def _extract_next_data(html: str) -> dict | None:
     m = _NEXT_DATA_RE.search(html)
     if not m:
         return None
@@ -321,14 +320,13 @@ def _score(query_artist: str, query_title: str, track: dict) -> float:
     full    = (name + " " + mix).strip()
 
     # Hard floor: at least one artist token must overlap.
-    if qa and artists:
-        if not any(qa in a or a in qa for a in artists):
-            try:
-                from rapidfuzz import fuzz
-                if max(fuzz.partial_ratio(qa, a) for a in artists) < 70:
-                    return 0.0
-            except Exception:
+    if qa and artists and not any(qa in a or a in qa for a in artists):
+        try:
+            from rapidfuzz import fuzz
+            if max(fuzz.partial_ratio(qa, a) for a in artists) < 70:
                 return 0.0
+        except Exception:
+            return 0.0
 
     try:
         from rapidfuzz import fuzz
@@ -386,7 +384,7 @@ def search(query_artist: str, query_title: str, session=None,
 def lookup_beatport(artist: str, title: str,
                     session=None,
                     min_score: float = 70.0,
-                    use_cache: bool = True) -> Optional[dict]:
+                    use_cache: bool = True) -> dict | None:
     """Return the best Beatport match if it scores above *min_score*,
     else None.  Output shape mirrors lookup_getsongbpm so callers can
     treat both sources interchangeably.

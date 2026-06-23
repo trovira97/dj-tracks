@@ -14,13 +14,6 @@ from pathlib import Path
 # ─────────────────────────────────────────────────────────────────────────────
 # Python version guard  (requires 3.9+ for dict[...] syntax in dependencies)
 # ─────────────────────────────────────────────────────────────────────────────
-if sys.version_info < (3, 9):
-    print(
-        f"[DJ Tracks] ERROR: Python 3.9+ requerido — detectado {sys.version}\n"
-        "Por favor lanza la app desde iniciar.bat o instala Python 3.10+.",
-        file=sys.stderr,
-    )
-    sys.exit(1)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # sys.path setup
@@ -120,7 +113,8 @@ def main() -> None:
         _bootstrap()
 
     # ── 3) Single-instance lock — refuse to launch a duplicate ───────────────
-    from utils.single_instance import acquire as _acquire_single, release as _release_single
+    from utils.single_instance import acquire as _acquire_single
+    from utils.single_instance import release as _release_single
     if not _acquire_single():
         try:
             import tkinter as _tk
@@ -136,7 +130,7 @@ def main() -> None:
 
     try:
         from core.controller import AppController
-        from ui.gui          import DjTracksDwCrackApp
+        from ui.gui import DjTracksDwCrackApp
 
         controller = AppController()
         app        = DjTracksDwCrackApp(controller)

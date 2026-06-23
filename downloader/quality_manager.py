@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List
 
 
 class AudioFormat(str, Enum):
@@ -58,7 +57,7 @@ class QualityProfile:
         """
         return "bestaudio/best"
 
-    def yt_dlp_postprocessors(self) -> List[Dict]:
+    def yt_dlp_postprocessors(self) -> list[dict]:
         """
         Return the yt-dlp ``postprocessors`` list for this profile.
 
@@ -68,7 +67,7 @@ class QualityProfile:
         if self.format == AudioFormat.BEST:
             return []
 
-        pp: Dict = {
+        pp: dict = {
             "key":            "FFmpegExtractAudio",
             "preferredcodec": self.format.value,
         }
@@ -84,7 +83,7 @@ class QualityProfile:
 # Pre-built profiles
 # ─────────────────────────────────────────────────────────────────────────────
 
-PROFILES: Dict[str, QualityProfile] = {
+PROFILES: dict[str, QualityProfile] = {
     "mp3_128":  QualityProfile(AudioFormat.MP3,  AudioQuality.Q128,  "MP3  128 kbps"),
     "mp3_192":  QualityProfile(AudioFormat.MP3,  AudioQuality.Q192,  "MP3  192 kbps"),
     "mp3_320":  QualityProfile(AudioFormat.MP3,  AudioQuality.Q320,  "MP3  320 kbps"),

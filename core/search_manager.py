@@ -12,15 +12,14 @@ thread pool, reducing worst-case wait time from O(n×timeout) to O(timeout).
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, List, Optional
 
 from providers import MusicProvider, TrackInfo
-from providers.applemusic_provider  import AppleMusicProvider
-from providers.bandcamp_provider    import BandcampProvider
-from providers.soundcloud_provider  import SoundCloudProvider
-from providers.spotify_provider     import SpotifyProvider
-from providers.youtube_provider     import YouTubeProvider
-from utils.logger     import log
+from providers.applemusic_provider import AppleMusicProvider
+from providers.bandcamp_provider import BandcampProvider
+from providers.soundcloud_provider import SoundCloudProvider
+from providers.spotify_provider import SpotifyProvider
+from providers.youtube_provider import YouTubeProvider
+from utils.logger import log
 from utils.validators import Platform, detect_platform
 
 
@@ -44,13 +43,13 @@ class SearchManager:
 
     def __init__(
         self,
-        spotify:     Optional[SpotifyProvider]    = None,
-        apple_music: Optional[AppleMusicProvider] = None,
-        soundcloud:  Optional[SoundCloudProvider] = None,
-        bandcamp:    Optional[BandcampProvider]   = None,
-        youtube:     Optional[YouTubeProvider]    = None,
+        spotify:     SpotifyProvider | None    = None,
+        apple_music: AppleMusicProvider | None = None,
+        soundcloud:  SoundCloudProvider | None = None,
+        bandcamp:    BandcampProvider | None   = None,
+        youtube:     YouTubeProvider | None    = None,
     ) -> None:
-        self._providers: Dict[Platform, MusicProvider] = {}
+        self._providers: dict[Platform, MusicProvider] = {}
 
         if spotify:
             self._providers[Platform.SPOTIFY]     = spotify
@@ -80,7 +79,7 @@ class SearchManager:
         platform: Platform = Platform.UNKNOWN,
         limit: int = 20,
         include_albums: bool = True,
-    ) -> List[TrackInfo]:
+    ) -> list[TrackInfo]:
         """
         Search by text query for tracks (and optionally whole albums).
 
@@ -126,8 +125,8 @@ class SearchManager:
         for plat, p in self._providers.items():
             tasks.append(("track", plat, lambda p=p: p.search(query, per_provider)))
 
-        albums: List[TrackInfo] = []
-        tracks: List[TrackInfo] = []
+        albums: list[TrackInfo] = []
+        tracks: list[TrackInfo] = []
         with ThreadPoolExecutor(
             max_workers=max(2, len(tasks)),
             thread_name_prefix="dj-search",
@@ -145,7 +144,7 @@ class SearchManager:
         tracks = self._deduplicate(tracks)
         return (albums + tracks)[:limit + len(albums)]
 
-    def resolve_url(self, url: str) -> List[TrackInfo]:
+    def resolve_url(self, url: str) -> list[TrackInfo]:
         """
         Detect the platform from *url* and return its tracks.
 
@@ -178,24 +177,24 @@ class SearchManager:
         self._providers[platform] = provider
         log.info(f"[SearchManager] Proveedor actualizado: {platform}")
 
-    def provider_for(self, platform: Platform) -> Optional[MusicProvider]:
+    def provider_for(self, platform: Platform) -> MusicProvider | None:
         """Return the provider registered for *platform*, or ``None``."""
         return self._providers.get(platform)
 
     @property
-    def available_platforms(self) -> List[str]:
+    def available_platforms(self) -> list[str]:
         """List of platform value strings for registered providers."""
         return [p.value for p in self._providers]
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _deduplicate(tracks: List[TrackInfo]) -> List[TrackInfo]:
+    def _deduplicate(tracks: list[TrackInfo]) -> list[TrackInfo]:
         """Remove duplicates (same artist + title, case-insensitive).  Albums
         and tracks are kept in separate namespaces so an album doesn't dedup
         against a single track of the same name."""
         seen: set[str] = set()
-        unique: List[TrackInfo] = []
+        unique: list[TrackInfo] = []
         for track in tracks:
             tag = "alb" if getattr(track, "is_album", False) else "trk"
             key = f"{tag}|{track.artist_str.lower()}|{track.title.lower()}"

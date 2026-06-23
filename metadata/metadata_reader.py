@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
 
 from utils.logger import log
 
@@ -19,7 +18,7 @@ class AudioMetadata:
     """Metadata read from an audio file."""
 
     title:        str        = ""
-    artists:      List[str]  = field(default_factory=list)
+    artists:      list[str]  = field(default_factory=list)
     album:        str        = ""
     album_artist: str        = ""
     year:         str        = ""
@@ -36,7 +35,7 @@ class AudioMetadata:
         return ", ".join(self.artists)
 
 
-def read_metadata(path: Path) -> Optional[AudioMetadata]:
+def read_metadata(path: Path) -> AudioMetadata | None:
     """
     Read metadata from an audio file using Mutagen.
 

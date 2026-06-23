@@ -4,7 +4,10 @@ from __future__ import annotations
 import pytest
 
 from utils.file_utils import (
-    build_output_path, ensure_dir, format_filesize, get_unique_path,
+    build_output_path,
+    ensure_dir,
+    format_filesize,
+    get_unique_path,
 )
 
 

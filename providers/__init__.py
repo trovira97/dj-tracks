@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -38,7 +38,7 @@ class TrackInfo:
     """
 
     title:        str
-    artists:      List[str]
+    artists:      list[str]
     album:        str               = ""
     album_artist: str               = ""    # may differ from artists for compilations
     year:         str               = ""    # 4-character year extracted from release_date
@@ -55,7 +55,7 @@ class TrackInfo:
     total_tracks: int               = 0     # 0 = unknown
     is_album:     bool              = False  # True when this result is a whole album/set
     track_count:  int               = 0     # number of tracks (albums only; 0 = unknown)
-    extra:        Dict[str, Any]    = field(default_factory=dict)
+    extra:        dict[str, Any]    = field(default_factory=dict)
 
     @property
     def artist_str(self) -> str:
@@ -80,7 +80,7 @@ class MusicProvider(ABC):
     """
 
     @abstractmethod
-    def search(self, query: str, limit: int = 10) -> List[TrackInfo]:
+    def search(self, query: str, limit: int = 10) -> list[TrackInfo]:
         """
         Search for tracks matching *query*.
 
@@ -94,7 +94,7 @@ class MusicProvider(ABC):
         ...
 
     @abstractmethod
-    def get_track(self, url_or_id: str) -> Optional[TrackInfo]:
+    def get_track(self, url_or_id: str) -> TrackInfo | None:
         """
         Fetch metadata for a single track by URL or platform ID.
 
@@ -104,7 +104,7 @@ class MusicProvider(ABC):
         ...
 
     @abstractmethod
-    def get_tracks_from_url(self, url: str) -> List[TrackInfo]:
+    def get_tracks_from_url(self, url: str) -> list[TrackInfo]:
         """
         Resolve a URL (track / album / playlist / artist) to a track list.
 

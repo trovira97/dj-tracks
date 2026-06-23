@@ -7,8 +7,6 @@ Handles search, single tracks, albums, playlists, and artist top tracks.
 """
 from __future__ import annotations
 
-from typing import List, Optional
-
 from providers import MusicProvider, TrackInfo
 from utils.logger import log
 from utils.validators import extract_spotify_id
@@ -55,7 +53,7 @@ class SpotifyProvider(MusicProvider):
 
     # ── Conversion ────────────────────────────────────────────────────────────
 
-    def _track_to_info(self, t: dict) -> Optional[TrackInfo]:
+    def _track_to_info(self, t: dict) -> TrackInfo | None:
         """
         Convert a Spotify track dict to TrackInfo with full metadata.
 
@@ -102,7 +100,7 @@ class SpotifyProvider(MusicProvider):
 
     # ── MusicProvider ─────────────────────────────────────────────────────────
 
-    def search(self, query: str, limit: int = 10) -> List[TrackInfo]:
+    def search(self, query: str, limit: int = 10) -> list[TrackInfo]:
         if not self._available:
             return []
         try:
@@ -113,7 +111,7 @@ class SpotifyProvider(MusicProvider):
             log.error(f"[Spotify] Error en búsqueda: {exc}")
             return []
 
-    def search_albums(self, query: str, limit: int = 10) -> List[TrackInfo]:
+    def search_albums(self, query: str, limit: int = 10) -> list[TrackInfo]:
         """Search albums.  The album URL resolves to all tracks via
         :meth:`get_tracks_from_url`."""
         if not self._available:
@@ -124,7 +122,7 @@ class SpotifyProvider(MusicProvider):
         except Exception as exc:
             log.error(f"[Spotify] Error en búsqueda de álbumes: {exc}")
             return []
-        out: List[TrackInfo] = []
+        out: list[TrackInfo] = []
         for al in albums:
             if not al or not al.get("id"):
                 continue
@@ -142,7 +140,7 @@ class SpotifyProvider(MusicProvider):
             ))
         return out
 
-    def get_track(self, url_or_id: str) -> Optional[TrackInfo]:
+    def get_track(self, url_or_id: str) -> TrackInfo | None:
         if not self._available:
             return None
         try:
@@ -153,7 +151,7 @@ class SpotifyProvider(MusicProvider):
             log.error(f"[Spotify] Error al obtener track: {exc}")
             return None
 
-    def get_tracks_from_url(self, url: str) -> List[TrackInfo]:
+    def get_tracks_from_url(self, url: str) -> list[TrackInfo]:
         if not self._available:
             return []
         try:

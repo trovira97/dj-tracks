@@ -4,7 +4,11 @@ from __future__ import annotations
 import pytest
 
 from downloader.quality_manager import (
-    AudioFormat, AudioQuality, DEFAULT_PROFILE, PROFILES, get_profile,
+    DEFAULT_PROFILE,
+    PROFILES,
+    AudioFormat,
+    AudioQuality,
+    get_profile,
 )
 
 

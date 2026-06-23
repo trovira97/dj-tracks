@@ -10,15 +10,12 @@ so the worker pool picks them up again from scratch.
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import List, Optional
 
 from downloader.audio_downloader import DownloadStatus, DownloadTask
-from downloader.quality_manager  import get_profile
-from providers                   import TrackInfo
-from utils.logger                import log
-from utils.paths                 import config_dir
-
+from downloader.quality_manager import get_profile
+from providers import TrackInfo
+from utils.logger import log
+from utils.paths import config_dir
 
 QUEUE_PATH = config_dir() / "queue.json"
 
@@ -49,7 +46,7 @@ def _task_to_dict(task: DownloadTask) -> dict:
     }
 
 
-def _dict_to_task(d: dict) -> Optional[DownloadTask]:
+def _dict_to_task(d: dict) -> DownloadTask | None:
     """Reconstruct a :class:`DownloadTask` from a dict.  Returns None on failure."""
     try:
         tr = d.get("track") or {}
@@ -82,7 +79,7 @@ def _dict_to_task(d: dict) -> Optional[DownloadTask]:
         return None
 
 
-def save_queue(tasks: List[DownloadTask]) -> int:
+def save_queue(tasks: list[DownloadTask]) -> int:
     """
     Persist the pending portion of *tasks* to disk.
 
@@ -104,7 +101,7 @@ def save_queue(tasks: List[DownloadTask]) -> int:
         return 0
 
 
-def load_queue() -> List[DownloadTask]:
+def load_queue() -> list[DownloadTask]:
     """
     Load previously persisted pending tasks from disk.
 

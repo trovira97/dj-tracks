@@ -15,11 +15,12 @@ their API terms when using this data.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import time
 import urllib.parse
-from typing import Callable, Iterable, Optional
+from collections.abc import Callable, Iterable
 
 # ── Camelot wheel: (key name, mode) -> Camelot code ─────────────────────────────
 # mode: 1 = major, 0 = minor
@@ -47,7 +48,7 @@ _ENHARMONIC = {
 _PITCH_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
 
-def _normalise_key(key_of: str, mode: Optional[str]) -> tuple[str, int]:
+def _normalise_key(key_of: str, mode: str | None) -> tuple[str, int]:
     """Turn a textual key like 'Db', 'F#m', 'A minor' into (root, mode_int).
 
     root is the bare note name in sharp notation (no 'm').
@@ -64,10 +65,7 @@ def _normalise_key(key_of: str, mode: Optional[str]) -> tuple[str, int]:
         is_major = 0 if (ms.startswith("min") or ms == "0") else 1
     else:
         # Infer from the string: a trailing 'm' (not 'maj') or 'min' => minor.
-        if "min" in low or (low.endswith("m") and not low.endswith("maj")):
-            is_major = 0
-        else:
-            is_major = 1
+        is_major = 0 if "min" in low or low.endswith("m") and not low.endswith("maj") else 1
 
     # Strip mode words/suffix to isolate the root note.
     root = re.sub(r"\s*(maj(or)?|min(or)?|m)\s*$", "", s, flags=re.IGNORECASE).strip()
@@ -78,7 +76,7 @@ def _normalise_key(key_of: str, mode: Optional[str]) -> tuple[str, int]:
     return (root, is_major)
 
 
-def key_to_camelot(key_of: str, mode: Optional[str] = None) -> tuple[str, str]:
+def key_to_camelot(key_of: str, mode: str | None = None) -> tuple[str, str]:
     """Return (musical_key, camelot). musical_key like 'Am' / 'F#'. camelot like '8A'."""
     root, is_major = _normalise_key(key_of, mode)
     if not root:
@@ -102,7 +100,7 @@ def _fuzzy(a: str, b: str) -> float:
 
 
 def lookup_getsongbpm(artist: str, title: str, api_key: str,
-                      session=None) -> Optional[dict]:
+                      session=None) -> dict | None:
     """Query GetSongBPM for a single track. Returns dict with bpm/key/camelot/genre
     or None when nothing usable is found."""
     if not api_key or not (artist or title):
@@ -173,7 +171,7 @@ _MAJ_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29
 _MIN_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
 
 
-def _spectral_cutoff_khz(y, sr) -> Optional[float]:
+def _spectral_cutoff_khz(y, sr) -> float | None:
     """Highest frequency (kHz) where real signal is present, by detecting the
     encoder's low-pass edge.
 
@@ -184,8 +182,8 @@ def _spectral_cutoff_khz(y, sr) -> Optional[float]:
     noise floor / quantisation).
     """
     try:
-        import numpy as np
         import librosa
+        import numpy as np
         S = np.abs(librosa.stft(y, n_fft=4096)).mean(axis=1)
         if S.size == 0 or S.max() <= 0:
             return None
@@ -199,7 +197,7 @@ def _spectral_cutoff_khz(y, sr) -> Optional[float]:
         return None
 
 
-def cutoff_to_bitrate(khz: Optional[float]) -> Optional[int]:
+def cutoff_to_bitrate(khz: float | None) -> int | None:
     """Map a low-pass-edge frequency to an approximate source bitrate (kbps).
 
     Approximate by design: encoders vary, so this is a conservative flag for
@@ -221,7 +219,7 @@ def cutoff_to_bitrate(khz: Optional[float]) -> Optional[int]:
 
 
 def analyze_local(filepath: str, with_quality: bool = False,
-                  need_keybpm: bool = True) -> Optional[dict]:
+                  need_keybpm: bool = True) -> dict | None:
     """Analyse an audio file with librosa.
 
     Returns a dict that may contain: bpm, key, camelot (when need_keybpm), and
@@ -229,8 +227,8 @@ def analyze_local(filepath: str, with_quality: bool = False,
     unavailable or the file can't be read.
     """
     try:
-        import numpy as np
         import librosa
+        import numpy as np
     except Exception:
         return None
     try:
@@ -326,7 +324,7 @@ def embed_cover(filepath: str, fmt: str, cover_url: str,
             mime = "image/jpeg"
 
         if ext == "mp3":
-            from mutagen.id3 import ID3, APIC, ID3NoHeaderError
+            from mutagen.id3 import APIC, ID3, ID3NoHeaderError
             try:
                 tags = ID3(filepath)
             except ID3NoHeaderError:
@@ -366,14 +364,14 @@ def chromaprint_available(ffmpeg: str = "ffmpeg") -> bool:
         return False
 
 
-def chromaprint_fingerprint(filepath: str, ffmpeg: str = "ffmpeg") -> Optional[list]:
+def chromaprint_fingerprint(filepath: str, ffmpeg: str = "ffmpeg") -> list | None:
     """Compute a Chromaprint acoustic fingerprint as a list of 32-bit ints.
 
     Robust to format/bitrate: the same recording yields near-identical
     fingerprints regardless of how it was encoded.
     """
-    import subprocess
     import struct
+    import subprocess
     try:
         flags = {}
         if os.name == "nt":
@@ -391,7 +389,7 @@ def chromaprint_fingerprint(filepath: str, ffmpeg: str = "ffmpeg") -> Optional[l
         return None
 
 
-def fp_similarity(a: Optional[list], b: Optional[list]) -> float:
+def fp_similarity(a: list | None, b: list | None) -> float:
     """Bit-similarity (0..1) between two Chromaprint fingerprints."""
     if not a or not b:
         return 0.0
@@ -399,13 +397,13 @@ def fp_similarity(a: Optional[list], b: Optional[list]) -> float:
     if n == 0:
         return 0.0
     match = 0
-    for x, y in zip(a[:n], b[:n]):
+    for x, y in zip(a[:n], b[:n], strict=False):
         match += 32 - bin(x ^ y).count("1")
     return match / (n * 32)
 
 
 # ── Loudness / ReplayGain (ffmpeg ebur128) ──────────────────────────────────────
-def measure_loudness(filepath: str, ffmpeg: str = "ffmpeg") -> Optional[dict]:
+def measure_loudness(filepath: str, ffmpeg: str = "ffmpeg") -> dict | None:
     """Measure integrated loudness (LUFS) and true peak (dBFS) with ffmpeg."""
     import subprocess
     try:
@@ -463,8 +461,18 @@ def write_tags(filepath: str, fmt: str, info: dict) -> bool:
 
     try:
         if ext == "mp3":
-            from mutagen.id3 import (ID3, TBPM, TKEY, TCON, COMM, TXXX,
-                                     TDRC, TPUB, TRCK, ID3NoHeaderError)
+            from mutagen.id3 import (
+                COMM,
+                ID3,
+                TBPM,
+                TCON,
+                TDRC,
+                TKEY,
+                TPUB,
+                TRCK,
+                TXXX,
+                ID3NoHeaderError,
+            )
             try:
                 tags = ID3(filepath)
             except ID3NoHeaderError:
@@ -526,8 +534,8 @@ def write_tags(filepath: str, fmt: str, info: dict) -> bool:
             return True
 
         if ext in ("wav", "wave"):
+            from mutagen.id3 import COMM, TBPM, TCON, TKEY, TXXX
             from mutagen.wave import WAVE
-            from mutagen.id3 import TBPM, TKEY, TCON, COMM, TXXX
             audio = WAVE(filepath)
             if audio.tags is None:
                 audio.add_tags()
@@ -553,7 +561,7 @@ def write_tags(filepath: str, fmt: str, info: dict) -> bool:
 _QUALITY_KBPS = {"128k": 128, "192k": 192, "256k": 256, "320k": 320}
 
 
-def _dj_rename(filepath: str, info: dict) -> Optional[str]:
+def _dj_rename(filepath: str, info: dict) -> str | None:
     """Rename a file to 'Original Name [BPM - Camelot].ext'. Returns new path."""
     bpm = info.get("bpm")
     cam = info.get("camelot") or info.get("key") or ""
@@ -591,9 +599,9 @@ def enrich_files(entries: Iterable[dict], fmt: str, api_key: str = "",
                  dj_filename: bool = False,
                  replaygain: bool = False,
                  ffmpeg: str = "ffmpeg",
-                 log: Optional[Callable[[str, str], None]] = None,
-                 progress: Optional[Callable[[int, int], None]] = None,
-                 stop_check: Optional[Callable[[], bool]] = None) -> dict:
+                 log: Callable[[str, str], None] | None = None,
+                 progress: Callable[[int, int], None] | None = None,
+                 stop_check: Callable[[], bool] | None = None) -> dict:
     """Enrich downloaded files with BPM/key/camelot/genre + extra sorting tags,
     embed full-res cover art, write ReplayGain, and flag tracks whose real audio
     quality is below what was requested.
@@ -604,10 +612,8 @@ def enrich_files(entries: Iterable[dict], fmt: str, api_key: str = "",
     """
     def _log(msg, kind="info"):
         if log:
-            try:
+            with contextlib.suppress(Exception):
                 log(msg, kind)
-            except Exception:
-                pass
 
     items = [e for e in entries if e.get("path") and os.path.exists(e["path"])]
     total = len(items)
@@ -645,10 +651,8 @@ def enrich_files(entries: Iterable[dict], fmt: str, api_key: str = "",
             break
         done += 1
         if progress:
-            try:
+            with contextlib.suppress(Exception):
                 progress(done, total)
-            except Exception:
-                pass
 
         title = e.get("title", "?")
 

@@ -4,9 +4,12 @@ from __future__ import annotations
 import pytest
 
 from utils.validators import (
-    ContentType, Platform,
-    detect_content_type, detect_platform,
-    extract_spotify_id, is_valid_url,
+    ContentType,
+    Platform,
+    detect_content_type,
+    detect_platform,
+    extract_spotify_id,
+    is_valid_url,
     sanitize_filename,
 )
 

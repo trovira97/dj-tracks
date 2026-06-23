@@ -8,7 +8,6 @@ from __future__ import annotations
 import shutil
 import uuid
 from pathlib import Path
-from typing import Union
 
 from utils.validators import sanitize_filename
 
@@ -93,7 +92,7 @@ def get_unique_path(path: Path) -> Path:
     return parent / f"{stem}_{short_uid}{suffix}"
 
 
-def ensure_dir(path: Union[str, Path]) -> Path:
+def ensure_dir(path: str | Path) -> Path:
     """
     Create *path* as a directory (and all missing parents) if it does not exist.
 

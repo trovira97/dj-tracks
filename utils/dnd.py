@@ -9,11 +9,11 @@ simply not advertise the feature in the UI.
 """
 from __future__ import annotations
 
-from typing import Callable, Optional
+from collections.abc import Callable
 
 try:
-    from tkinterdnd2 import DND_TEXT                       # type: ignore[import]
-    from tkinterdnd2.TkinterDnD import _require            # type: ignore[import]
+    from tkinterdnd2 import DND_TEXT  # type: ignore[import]
+    from tkinterdnd2.TkinterDnD import _require  # type: ignore[import]
     _AVAILABLE = True
 except Exception:  # tcl extension not built / lib missing / platform unsupported
     _AVAILABLE = False

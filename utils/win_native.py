@@ -21,6 +21,7 @@ All of these are no-ops on non-Windows platforms.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import subprocess
 import sys
 
@@ -80,10 +81,8 @@ def install_asyncio_policy() -> None:
     """
     if sys.platform != "win32":
         return
-    try:
+    with contextlib.suppress(Exception):
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    except Exception:
-        pass
 
 
 def install_all() -> None:

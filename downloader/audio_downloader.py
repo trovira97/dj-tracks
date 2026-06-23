@@ -20,23 +20,23 @@ progress callback, which is typically within a second.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Dict, Optional
 
-from downloader.quality_manager import QualityProfile, get_profile
+from downloader.quality_manager import QualityProfile
 from providers import TrackInfo
 from utils.file_utils import build_output_path, get_unique_path
 from utils.logger import log
 from utils.paths import bundled_resource
 from utils.validators import Platform
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sentinel exception for mid-download cancellation
@@ -89,7 +89,7 @@ class DownloadTask:
     structure:   str            = "{artist}/{album}/{artist} - {title}"
     status:      DownloadStatus = DownloadStatus.PENDING
     progress:    float          = 0.0
-    output_path: Optional[Path] = None
+    output_path: Path | None = None
     error_msg:   str            = ""
     task_id:     str            = field(default_factory=lambda: uuid.uuid4().hex)
     metadata_source: str        = ""   # "beatport" / "getsongbpm" / "librosa"
@@ -122,12 +122,12 @@ class AudioDownloader:
 
     def __init__(
         self,
-        on_progress: Optional[ProgressCallback] = None,
-        ffmpeg_path: Optional[str] = None,
+        on_progress: ProgressCallback | None = None,
+        ffmpeg_path: str | None = None,
     ) -> None:
         self._on_progress  = on_progress
         self._ffmpeg_path  = ffmpeg_path or self._find_ffmpeg()
-        self._cancel_flags: Dict[str, bool] = {}
+        self._cancel_flags: dict[str, bool] = {}
         self._flags_lock   = threading.Lock()
         # Global pause flag — when set, progress hooks block until cleared.
         self._paused = threading.Event()
@@ -156,7 +156,7 @@ class AudioDownloader:
     # ── FFmpeg detection ──────────────────────────────────────────────────────
 
     @staticmethod
-    def _find_ffmpeg() -> Optional[str]:
+    def _find_ffmpeg() -> str | None:
         """
         Locate a usable ffmpeg binary.
 
@@ -222,10 +222,8 @@ class AudioDownloader:
     def _notify(self, task: DownloadTask, pct: float, msg: str) -> None:
         task.progress = pct
         if self._on_progress:
-            try:
+            with contextlib.suppress(Exception):
                 self._on_progress(task, pct, msg)
-            except Exception:
-                pass
 
     # ── Engine router ─────────────────────────────────────────────────────────
 
@@ -394,7 +392,7 @@ class AudioDownloader:
                                "format_sort": []}),
         ]
 
-        last_exc: Optional[Exception] = None
+        last_exc: Exception | None = None
 
         for label, opts in attempts:
             try:
@@ -456,7 +454,6 @@ class AudioDownloader:
         """
         try:
             from spotdl import Spotdl as _Spotdl
-            from spotdl.types.song import Song as _Song
             from spotdl.utils.spotify import SpotifyClient as _SC
         except Exception as exc:
             log.info(f"[Downloader spotdl] No disponible: {exc}")
@@ -507,19 +504,15 @@ class AudioDownloader:
 
         # Spotdl/SpotifyClient is a class-level singleton — reset before
         # building a new client with our credentials.
-        try:
+        with contextlib.suppress(Exception):
             _SC._instance = None
-        except Exception:
-            pass
 
         # Silence spotdl + spotipy's noisy stderr loggers — we surface the
         # important failures (with classification) ourselves.
         import logging as _logging
         for _name in ("spotdl", "spotipy", "spotipy.client"):
-            try:
+            with contextlib.suppress(Exception):
                 _logging.getLogger(_name).setLevel(_logging.ERROR)
-            except Exception:
-                pass
 
         try:
             with self._spotdl_lock:
@@ -572,10 +565,8 @@ class AudioDownloader:
         # flag between calls and via the asyncio.set_event_loop incantation
         # that spotdl requires from a worker thread.
         import asyncio
-        try:
+        with contextlib.suppress(Exception):
             asyncio.set_event_loop(client.downloader.loop)
-        except Exception:
-            pass
 
         with self._flags_lock:
             if self._cancel_flags.get(task.task_id):
@@ -612,7 +603,8 @@ class AudioDownloader:
         Same fall-through used by the controller, but we re-implement here
         so the downloader stays decoupled from AppController.
         """
-        import json, os as _os
+        import json
+        import os as _os
         cid = _os.environ.get("SPOTIFY_CLIENT_ID")     or ""
         cs  = _os.environ.get("SPOTIFY_CLIENT_SECRET") or ""
         if cid and cs:

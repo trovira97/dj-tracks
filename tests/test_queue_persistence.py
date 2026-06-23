@@ -4,8 +4,8 @@ from __future__ import annotations
 import pytest
 
 from downloader.audio_downloader import DownloadStatus, DownloadTask
-from downloader.quality_manager  import DEFAULT_PROFILE
-from providers                   import TrackInfo
+from downloader.quality_manager import DEFAULT_PROFILE
+from providers import TrackInfo
 
 
 @pytest.fixture

@@ -18,21 +18,17 @@ Renders a polished CustomTkinter ``CTkToplevel`` with:
 from __future__ import annotations
 
 import io
-import tkinter as tk
-import webbrowser
-from typing import Dict, Union
 
 import customtkinter as ctk
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Configure your own wallet addresses here.  Leave any line as "" to hide
 # that coin from the dialog.
 # ─────────────────────────────────────────────────────────────────────────────
 
-WalletEntry = Union[str, Dict[str, str]]   # str = address; dict for memo-aware
+WalletEntry = str | dict[str, str]   # str = address; dict for memo-aware
 
-CRYPTO_ADDRESSES: Dict[str, WalletEntry] = {
+CRYPTO_ADDRESSES: dict[str, WalletEntry] = {
     "BTC":   "",
     "ETH":   "",
     "BNB":   "",
@@ -43,7 +39,7 @@ CRYPTO_ADDRESSES: Dict[str, WalletEntry] = {
     "XRP":   "",
 }
 
-CRYPTO_META: Dict[str, Dict[str, str]] = {
+CRYPTO_META: dict[str, dict[str, str]] = {
     "BTC":   {"color": "#F7931A", "symbol": "₿", "network": "Bitcoin"},
     "ETH":   {"color": "#627EEA", "symbol": "Ξ", "network": "Ethereum (ERC-20)"},
     "BNB":   {"color": "#F3BA2F", "symbol": "⬡", "network": "BNB Smart Chain"},
@@ -92,7 +88,7 @@ def _qr_image(data: str, fg: str, size: int = 220):
 # Public entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
-def show_donations(root, palette: Dict[str, str]) -> None:
+def show_donations(root, palette: dict[str, str]) -> None:
     """
     Open the donations modal on top of *root* using the active *palette*.
 
@@ -165,7 +161,7 @@ def show_donations(root, palette: Dict[str, str]) -> None:
     win.geometry(f"+{rx + (rw - ww)//2}+{ry + (rh - wh)//2}")
 
 
-def _show_one(parent, C: Dict[str, str], coin: str) -> None:
+def _show_one(parent, C: dict[str, str], coin: str) -> None:
     """Modal showing one coin's address, optional QR, and copy buttons."""
     entry = CRYPTO_ADDRESSES.get(coin, "")
     if isinstance(entry, dict):

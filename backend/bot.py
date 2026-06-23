@@ -19,6 +19,7 @@ both HTTP and Discord at the same time.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import re
@@ -69,8 +70,9 @@ class DJTracksBot(discord.Client):
         if had == has:
             return
 
-        from app import db
         import time
+
+        from app import db
         now = int(time.time())
         discord_id = str(after.id)
 
@@ -89,15 +91,13 @@ class DJTracksBot(discord.Client):
             log.info(f"[Bot] Donor role granted to {after} ({discord_id}) — "
                      f"added to donors")
             # Friendly DM so the user knows their access is live.
-            try:
+            with contextlib.suppress(discord.Forbidden):
                 await after.send(
                     "🎉 ¡Felicidades! Has recibido el rol **Donor** en "
                     "DJ Tracks.  Tu app ya tiene acceso ilimitado a partir "
                     "del próximo arranque (o tras pulsar cualquier botón "
                     "que toque el backend, en segundos)."
                 )
-            except discord.Forbidden:
-                pass
         else:
             with db() as c:
                 c.execute("DELETE FROM donors WHERE discord_id = ?",
@@ -182,8 +182,8 @@ class DJTracksBot(discord.Client):
             ok = await discord_add_donor_role(str(user.id))
             if ok:
                 await user.send(
-                    f"✓ Rol Donor restaurado.  ¡Gracias por seguir apoyando "
-                    f"DJ Tracks!"
+                    "✓ Rol Donor restaurado.  ¡Gracias por seguir apoyando "
+                    "DJ Tracks!"
                 )
             else:
                 await user.send(
@@ -219,10 +219,8 @@ class DJTracksBot(discord.Client):
             value="Te enseño esta lista.",
             inline=False,
         )
-        try:
+        with contextlib.suppress(discord.Forbidden):
             await user.send(embed=embed)
-        except discord.Forbidden:
-            pass
 
 
 # ── Bot instance + lifecycle ────────────────────────────────────────────────

@@ -19,7 +19,6 @@ from __future__ import annotations
 import logging
 import os
 import webbrowser
-from typing import Optional
 
 log = logging.getLogger("dj_tracks.donor.client")
 
@@ -33,8 +32,8 @@ DEFAULT_KOFI_USERNAME = "trovira_97"
 
 
 def usage_call(action: str, device_id: str,
-               discord_id: Optional[str] = None,
-               timeout: float = 4.0) -> Optional[dict]:
+               discord_id: str | None = None,
+               timeout: float = 4.0) -> dict | None:
     """POST to /usage/{action} with the device id.
 
     Returns the server's state dict on success, None on any network
@@ -64,8 +63,9 @@ def usage_call(action: str, device_id: str,
 def kofi_url() -> str:
     """Return the Ko-fi donation URL for this install."""
     try:
-        from utils.paths import config_dir
         import json
+
+        from utils.paths import config_dir
         p = config_dir() / "settings.json"
         if p.exists():
             data = json.loads(p.read_text(encoding="utf-8"))
@@ -82,8 +82,9 @@ def _backend_url() -> str:
     if env:
         return env.rstrip("/")
     try:
-        from utils.paths import config_dir
         import json
+
+        from utils.paths import config_dir
         p = config_dir() / "settings.json"
         if p.exists():
             data = json.loads(p.read_text(encoding="utf-8"))
@@ -95,7 +96,7 @@ def _backend_url() -> str:
     return DEFAULT_BACKEND
 
 
-def check_donor(discord_user_id: str, timeout: float = 5.0) -> Optional[bool]:
+def check_donor(discord_user_id: str, timeout: float = 5.0) -> bool | None:
     """Ask the backend whether *discord_user_id* has the Donor role.
 
     Returns True / False on a clean response, None on any error.  The
@@ -139,7 +140,7 @@ def open_oauth_flow(local_token: str) -> bool:
         return False
 
 
-def poll_oauth_result(local_token: str, timeout: float = 5.0) -> Optional[dict]:
+def poll_oauth_result(local_token: str, timeout: float = 5.0) -> dict | None:
     """Poll the backend for the result of an in-progress OAuth flow.
 
     Returns ``{discord_user_id, discord_username, donor}`` once the

@@ -14,11 +14,9 @@ so we don't need a YouTube Data API key.
 from __future__ import annotations
 
 import re
-from typing import List, Optional
 
 from providers import MusicProvider, TrackInfo
 from utils.logger import log
-
 
 # Quick guess at "artist - title" from a video title.  YouTube videos
 # overwhelmingly follow the "Artist - Title (Official Video)" pattern;
@@ -78,7 +76,7 @@ def _best_thumbnail(thumbnails: list) -> str:
         return ""
 
 
-def _entry_to_info(entry: dict) -> Optional[TrackInfo]:
+def _entry_to_info(entry: dict) -> TrackInfo | None:
     if not isinstance(entry, dict):
         return None
     try:
@@ -150,7 +148,7 @@ class YouTubeProvider(MusicProvider):
 
     # ── Low-level yt-dlp call ────────────────────────────────────────────────
     @staticmethod
-    def _extract(url_or_query: str, *, flat: bool = False) -> Optional[dict]:
+    def _extract(url_or_query: str, *, flat: bool = False) -> dict | None:
         """Run yt-dlp's extract_info without downloading."""
         try:
             import yt_dlp
@@ -172,7 +170,7 @@ class YouTubeProvider(MusicProvider):
 
     # ── MusicProvider ───────────────────────────────────────────────────────
 
-    def search(self, query: str, limit: int = 10) -> List[TrackInfo]:
+    def search(self, query: str, limit: int = 10) -> list[TrackInfo]:
         if not query.strip() or not self._available:
             return []
         # ytsearch{N}: returns N flat entries with title/uploader/url.
@@ -182,7 +180,7 @@ class YouTubeProvider(MusicProvider):
         info = self._extract(f"ytsearch{limit}:{query}", flat=True)
         if not info or "entries" not in info:
             return []
-        out: List[TrackInfo] = []
+        out: list[TrackInfo] = []
         for entry in info["entries"]:
             ti = _entry_to_info(entry)
             if ti:
@@ -191,7 +189,7 @@ class YouTubeProvider(MusicProvider):
                 break
         return out
 
-    def get_track(self, url_or_id: str) -> Optional[TrackInfo]:
+    def get_track(self, url_or_id: str) -> TrackInfo | None:
         if not self._available:
             return None
         url = url_or_id
@@ -202,7 +200,7 @@ class YouTubeProvider(MusicProvider):
             return None
         return _entry_to_info(info)
 
-    def get_tracks_from_url(self, url: str) -> List[TrackInfo]:
+    def get_tracks_from_url(self, url: str) -> list[TrackInfo]:
         """Resolve a YouTube URL.
 
         - Single video           → list of one TrackInfo (full metadata).
@@ -220,7 +218,7 @@ class YouTubeProvider(MusicProvider):
         if not info:
             return []
         if is_playlist and "entries" in info:
-            out: List[TrackInfo] = []
+            out: list[TrackInfo] = []
             for entry in info["entries"]:
                 ti = _entry_to_info(entry)
                 if ti:

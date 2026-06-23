@@ -19,6 +19,7 @@ refuses to apply — it only knows how to swap a frozen ``.exe``.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -28,8 +29,8 @@ import subprocess
 import sys
 import tempfile
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
 log = logging.getLogger("dj_tracks.updater")
 
@@ -80,7 +81,7 @@ def _repo() -> str:
     return DEFAULT_REPO
 
 
-def _pick_asset(assets: list) -> Optional[dict]:
+def _pick_asset(assets: list) -> dict | None:
     """Pick the right asset for the current platform.
 
     Preference order: .exe (Windows installer/portable) → .zip with
@@ -102,7 +103,7 @@ def _pick_asset(assets: list) -> Optional[dict]:
 
 
 def check_for_update(current_version: str,
-                     repo: Optional[str] = None,
+                     repo: str | None = None,
                      timeout: float = 8.0) -> dict:
     """Return ``{available, latest, url, asset_url, asset_name,
     asset_size, body, repo}``.  ``available`` is False on any error so
@@ -142,7 +143,7 @@ def check_for_update(current_version: str,
 # ── Download with progress ─────────────────────────────────────────────────
 
 def download_asset(asset_url: str, dest_path: Path,
-                   progress: Optional[Callable[[int, int], None]] = None,
+                   progress: Callable[[int, int], None] | None = None,
                    chunk_size: int = 64 * 1024) -> bool:
     """Stream *asset_url* to *dest_path*.  Calls progress(done, total)
     every chunk.  Returns True on success."""
@@ -160,17 +161,13 @@ def download_asset(asset_url: str, dest_path: Path,
                     fh.write(chunk)
                     done += len(chunk)
                     if progress:
-                        try:
+                        with contextlib.suppress(Exception):
                             progress(done, total)
-                        except Exception:
-                            pass
         return True
     except Exception as exc:
         log.error(f"[Updater] download failed: {exc}")
-        try:
+        with contextlib.suppress(Exception):
             dest_path.unlink(missing_ok=True)
-        except Exception:
-            pass
         return False
 
 
@@ -231,10 +228,8 @@ def _apply_exe_swap(current_exe: Path, new_exe: Path) -> bool:
         shutil.copy2(new_exe, current_exe)
     except Exception as exc:
         log.error(f"[Updater] copy failed, rolling back: {exc}")
-        try:
+        with contextlib.suppress(Exception):
             os.rename(backup, current_exe)
-        except Exception:
-            pass
         return False
     commands = [f'del /F /Q "{backup}" >nul 2>&1']
     return _spawn_relaunch_bat(commands, current_exe)
@@ -271,7 +266,7 @@ def _apply_zip_swap(current_exe: Path, zip_path: Path) -> bool:
         return False
 
     # Find the folder inside the zip that contains a copy of our .exe.
-    new_root: Optional[Path] = None
+    new_root: Path | None = None
     # Most common: zip wraps a single folder.
     for candidate in [staging, *staging.iterdir()]:
         if candidate.is_dir() and (candidate / exe_name).exists():

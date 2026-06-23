@@ -9,13 +9,22 @@ M4A / AAC (MP4 atoms), and OGG Vorbis.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Optional, Tuple
 
 import requests
 from mutagen.flac import FLAC, Picture
 from mutagen.id3 import (
-    APIC, ID3, ID3NoHeaderError,
-    TALB, TDRC, TCON, TIT2, TPE1, TPE2, TPOS, TRCK, TSRC,
+    APIC,
+    ID3,
+    TALB,
+    TCON,
+    TDRC,
+    TIT2,
+    TPE1,
+    TPE2,
+    TPOS,
+    TRCK,
+    TSRC,
+    ID3NoHeaderError,
 )
 from mutagen.mp4 import MP4, MP4Cover
 from mutagen.oggvorbis import OggVorbis
@@ -34,7 +43,7 @@ _MAX_COVER_BYTES = 20 * 1024 * 1024
 # Cover art
 # ─────────────────────────────────────────────────────────────────────────────
 
-def download_cover(url: str, timeout: int = 10) -> Optional[bytes]:
+def download_cover(url: str, timeout: int = 10) -> bytes | None:
     """
     Fetch cover art bytes from *url*.
 
@@ -76,7 +85,7 @@ def download_cover(url: str, timeout: int = 10) -> Optional[bytes]:
 def write_metadata(
     path: Path,
     track: TrackInfo,
-    cover_data: Optional[bytes] = None,
+    cover_data: bytes | None = None,
 ) -> bool:
     """
     Write complete metadata from *track* into the audio file at *path*.
@@ -114,7 +123,7 @@ def write_metadata(
 # Format-specific writers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _write_mp3(path: Path, track: TrackInfo, cover: Optional[bytes]) -> bool:
+def _write_mp3(path: Path, track: TrackInfo, cover: bytes | None) -> bool:
     """Write ID3v2.3 tags to an MP3 file (title, artists, album, album artist,
     date, genre, ISRC, track/disc numbers, cover)."""
     try:
@@ -158,7 +167,7 @@ def _write_mp3(path: Path, track: TrackInfo, cover: Optional[bytes]) -> bool:
         return False
 
 
-def _write_flac(path: Path, track: TrackInfo, cover: Optional[bytes]) -> bool:
+def _write_flac(path: Path, track: TrackInfo, cover: bytes | None) -> bool:
     """Write VorbisComment tags (and optional cover Picture) to a FLAC file."""
     try:
         audio = FLAC(str(path))
@@ -195,7 +204,7 @@ def _write_flac(path: Path, track: TrackInfo, cover: Optional[bytes]) -> bool:
         return False
 
 
-def _write_m4a(path: Path, track: TrackInfo, cover: Optional[bytes]) -> bool:
+def _write_m4a(path: Path, track: TrackInfo, cover: bytes | None) -> bool:
     """Write MP4 atoms to an M4A / AAC file."""
     try:
         audio = MP4(str(path))
@@ -221,7 +230,7 @@ def _write_m4a(path: Path, track: TrackInfo, cover: Optional[bytes]) -> bool:
         return False
 
 
-def _write_ogg(path: Path, track: TrackInfo, cover: Optional[bytes]) -> bool:
+def _write_ogg(path: Path, track: TrackInfo, cover: bytes | None) -> bool:
     """Write VorbisComment tags to an OGG Vorbis file (cover not embedded)."""
     try:
         audio = OggVorbis(str(path))
@@ -243,7 +252,7 @@ def _write_ogg(path: Path, track: TrackInfo, cover: Optional[bytes]) -> bool:
 # Verification & auto-fix
 # ─────────────────────────────────────────────────────────────────────────────
 
-def verify_and_fix(path: Path, track: TrackInfo) -> Dict[str, Tuple[str, str]]:
+def verify_and_fix(path: Path, track: TrackInfo) -> dict[str, tuple[str, str]]:
     """
     Compare the on-disk metadata against *track* and rewrite if discrepancies
     are found.
@@ -254,7 +263,7 @@ def verify_and_fix(path: Path, track: TrackInfo) -> Dict[str, Tuple[str, str]]:
         Dict mapping field name → ``(old_value, new_value)`` for each
         corrected field.  Empty dict means no corrections were needed.
     """
-    current: Optional[AudioMetadata] = read_metadata(path)
+    current: AudioMetadata | None = read_metadata(path)
     if not current:
         log.warning(f"[MetadataWriter] No se pudieron leer metadatos de {path.name}")
         return {}
@@ -262,7 +271,7 @@ def verify_and_fix(path: Path, track: TrackInfo) -> Dict[str, Tuple[str, str]]:
     def _differs(a: str, b: str) -> bool:
         return (a or "").strip().lower() != (b or "").strip().lower()
 
-    corrections: Dict[str, Tuple[str, str]] = {}
+    corrections: dict[str, tuple[str, str]] = {}
     checks = [
         ("title",        current.title,        track.title),
         ("artist",       current.artist_str,   track.artist_str),

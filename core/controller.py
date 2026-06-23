@@ -9,28 +9,28 @@ Downloads run in a thread pool, so multiple tracks can download concurrently
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
 
-from core.queue_persistence        import load_queue, save_queue
-from core.search_manager           import SearchManager
-from downloader.audio_downloader   import AudioDownloader, DownloadStatus, DownloadTask
-from downloader.quality_manager    import get_profile
-from metadata.metadata_writer      import download_cover, verify_and_fix, write_metadata
-from providers                     import TrackInfo
+from core.queue_persistence import load_queue, save_queue
+from core.search_manager import SearchManager
+from downloader.audio_downloader import AudioDownloader, DownloadStatus, DownloadTask
+from downloader.quality_manager import get_profile
+from metadata.metadata_writer import download_cover, verify_and_fix, write_metadata
+from providers import TrackInfo
 from providers.applemusic_provider import AppleMusicProvider
-from providers.bandcamp_provider   import BandcampProvider
+from providers.bandcamp_provider import BandcampProvider
 from providers.soundcloud_provider import SoundCloudProvider
-from providers.spotify_provider    import SpotifyProvider
-from utils.file_utils              import ensure_dir
-from utils.logger                  import log
-from utils.paths                   import config_dir
-from utils.validators              import Platform
-
+from providers.spotify_provider import SpotifyProvider
+from utils.file_utils import ensure_dir
+from utils.logger import log
+from utils.paths import config_dir
+from utils.validators import Platform
 
 UpdateCallback = Callable[[DownloadTask], None]
 
@@ -58,9 +58,9 @@ class AppController:
 
     CONFIG_PATH: Path = config_dir() / "settings.json"
 
-    def __init__(self, on_task_update: Optional[UpdateCallback] = None) -> None:
-        self._on_task_update: Optional[UpdateCallback] = on_task_update
-        self._config: Dict = {}
+    def __init__(self, on_task_update: UpdateCallback | None = None) -> None:
+        self._on_task_update: UpdateCallback | None = on_task_update
+        self._config: dict = {}
         self._load_config()
 
         # Credentials: env vars override the JSON config (more secure for CI / shared boxes).
@@ -79,7 +79,7 @@ class AppController:
 
         # Download queue (append-only; tasks are never removed from the list,
         # only their status changes so the UI can reflect the final state).
-        self._queue: List[DownloadTask] = []
+        self._queue: list[DownloadTask] = []
         self._queue_lock = threading.Lock()
         self._dedup_lock = threading.Lock()   # guards the shared fingerprint index
 
@@ -91,11 +91,11 @@ class AppController:
         )
 
         # Persisted queue is loaded explicitly by the UI (after callbacks are wired).
-        self._restored_tasks: List[DownloadTask] = load_queue()
+        self._restored_tasks: list[DownloadTask] = load_queue()
 
     # ── Public callback management ────────────────────────────────────────────
 
-    def set_on_task_update(self, callback: Optional[UpdateCallback]) -> None:
+    def set_on_task_update(self, callback: UpdateCallback | None) -> None:
         """Register (or clear) the UI notification callback."""
         self._on_task_update = callback
 
@@ -114,7 +114,7 @@ class AppController:
             log.warning(f"[Controller] Error al cargar config: {exc}")
             self._config = {}
 
-    def save_config(self, updates: Dict) -> None:
+    def save_config(self, updates: dict) -> None:
         """Merge *updates* into the current config and persist atomically."""
         self._config.update(updates)
         try:
@@ -128,9 +128,9 @@ class AppController:
         """Return ``config[key]``, or *default* if the key is absent."""
         return self._config.get(key, default)
 
-    def search_diagnostics(self) -> List[str]:
+    def search_diagnostics(self) -> list[str]:
         """Return short warning strings for providers that cannot be used."""
-        warnings: List[str] = []
+        warnings: list[str] = []
         sp = self._config.get("spotify", {})
         if not (sp.get("client_id") and sp.get("client_secret")):
             warnings.append("Spotify sin credenciales API")
@@ -146,8 +146,8 @@ class AppController:
         query: str,
         platform_str: str = "auto",
         limit: int = 20,
-    ) -> List[TrackInfo]:
-        mapping: Dict[str, Platform] = {
+    ) -> list[TrackInfo]:
+        mapping: dict[str, Platform] = {
             "spotify":    Platform.SPOTIFY,
             "applemusic": Platform.APPLE_MUSIC,
             "soundcloud": Platform.SOUNDCLOUD,
@@ -157,7 +157,7 @@ class AppController:
         platform = mapping.get(platform_str.lower(), Platform.UNKNOWN)
         return self.search_manager.search(query, platform=platform, limit=limit)
 
-    def resolve_url(self, url: str) -> List[TrackInfo]:
+    def resolve_url(self, url: str) -> list[TrackInfo]:
         """Resolve a platform URL and return the corresponding tracks."""
         return self.search_manager.resolve_url(url)
 
@@ -229,7 +229,7 @@ class AppController:
         Returns:
             The number of tracks enqueued.
         """
-        tracks: List[TrackInfo] = []
+        tracks: list[TrackInfo] = []
         if album.source_url:
             try:
                 tracks = self.search_manager.resolve_url(album.source_url)
@@ -261,11 +261,8 @@ class AppController:
         to the downloader; the download will abort at the next progress hook.
         """
         self.downloader.cancel(task.task_id)
-        with self._queue_lock:
-            try:
-                self._queue.remove(task)
-            except ValueError:
-                pass
+        with self._queue_lock, contextlib.suppress(ValueError):
+            self._queue.remove(task)
         if task.status not in (DownloadStatus.DONE, DownloadStatus.ERROR,
                                 DownloadStatus.CANCELLED):
             task.status    = DownloadStatus.CANCELLED
@@ -279,7 +276,7 @@ class AppController:
             self._queue = [t for t in self._queue if t.status not in terminal]
 
     @property
-    def queue(self) -> List[DownloadTask]:
+    def queue(self) -> list[DownloadTask]:
         """Thread-safe snapshot of the current download queue."""
         with self._queue_lock:
             return list(self._queue)
@@ -455,7 +452,7 @@ class AppController:
 
         # Serialise dedup across worker threads (shared index file).
         with self._dedup_lock:
-            index: Dict[str, list] = {}
+            index: dict[str, list] = {}
             try:
                 if idx_path.exists():
                     index = json.loads(idx_path.read_text(encoding="utf-8")) or {}
@@ -489,10 +486,8 @@ class AppController:
                 index[str(fpath.relative_to(folder))] = fp
             except Exception:
                 index[fpath.name] = fp
-            try:
+            with contextlib.suppress(Exception):
                 idx_path.write_text(json.dumps(index), encoding="utf-8")
-            except Exception:
-                pass
         return False
 
     def _dj_enrich(self, task: DownloadTask) -> None:
@@ -564,7 +559,7 @@ class AppController:
             # cancel_futures requires Python 3.9+
             self._executor.shutdown(wait=False)
 
-    def resume_restored_queue(self) -> List[DownloadTask]:
+    def resume_restored_queue(self) -> list[DownloadTask]:
         """
         Re-enqueue previously persisted tasks and return them.
 
@@ -591,10 +586,8 @@ class AppController:
     def _notify(self, task: DownloadTask) -> None:
         """Fire ``_on_task_update`` if a callback is registered."""
         if self._on_task_update:
-            try:
+            with contextlib.suppress(Exception):
                 self._on_task_update(task)
-            except Exception:
-                pass
 
     # ── Credential hot-swap ────────────────────────────────────────────────────
 
@@ -627,13 +620,11 @@ class AppController:
             max_workers=n,
             thread_name_prefix="dj-dl",
         )
-        try:
+        with contextlib.suppress(Exception):
             old.shutdown(wait=False)
-        except Exception:
-            pass
         log.info(f"[Controller] Hilos de descarga: {n}")
 
-    def update_ytdlp(self) -> Dict[str, str]:
+    def update_ytdlp(self) -> dict[str, str]:
         """
         Check PyPI for a newer yt-dlp release; install it if there is one.
 
@@ -695,7 +686,7 @@ class AppController:
         try:
             # CREATE_NEW_PROCESS_GROUP + DETACHED_PROCESS so the child outlives
             # us cleanly even if the user kills DJ Tracks before pip finishes.
-            kwargs: Dict = {}
+            kwargs: dict = {}
             if _os.name == "nt":
                 kwargs["creationflags"] = (
                     subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]

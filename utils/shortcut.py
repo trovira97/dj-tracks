@@ -12,11 +12,11 @@ or raises ``RuntimeError`` with a human-friendly message.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
 
 
 def _project_root() -> Path:
@@ -26,12 +26,12 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def _icon_path() -> Optional[Path]:
+def _icon_path() -> Path | None:
     p = _project_root() / "assets" / "icon.ico"
     return p if p.exists() else None
 
 
-def _logo_path() -> Optional[Path]:
+def _logo_path() -> Path | None:
     p = _project_root() / "assets" / "logo.png"
     return p if p.exists() else None
 
@@ -122,7 +122,7 @@ def _create_macos() -> Path:
 # Linux
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _linux_desktop() -> Optional[Path]:
+def _linux_desktop() -> Path | None:
     home = Path.home()
     # Try XDG user-dirs.dirs first (locale-aware).
     user_dirs = home / ".config" / "user-dirs.dirs"
@@ -178,11 +178,9 @@ def _create_linux() -> Path:
     os.chmod(target, 0o755)
 
     # Mark as trusted on GNOME (silent best-effort).
-    try:
+    with contextlib.suppress(Exception):
         subprocess.run(["gio", "set", str(target), "metadata::trusted", "true"],
                        capture_output=True, timeout=5)
-    except Exception:
-        pass
     return target
 
 

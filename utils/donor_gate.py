@@ -29,7 +29,6 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Optional
 
 log = logging.getLogger("dj_tracks.donor")
 
@@ -105,7 +104,7 @@ class _State:
 _STATE = _State()
 
 
-def _sync_with_server(action: str) -> Optional[dict]:
+def _sync_with_server(action: str) -> dict | None:
     """Call /usage/{action} with our device_id and return the server's
     state dict, or None on failure."""
     from utils import donor_client

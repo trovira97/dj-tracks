@@ -30,12 +30,10 @@ import json
 import logging
 import os
 import re
-import secrets
 import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -242,6 +240,7 @@ async def _startup() -> None:
     # loop FastAPI is using.  asyncio.create_task() won't block startup
     # but lets the bot's gateway connection run forever alongside HTTP.
     import asyncio
+
     from bot import start_bot
     asyncio.create_task(start_bot())
     log.info("[Startup] Discord bot launched")
@@ -265,7 +264,7 @@ def health() -> dict:
 
 class UsageBody(BaseModel):
     device_id:  str
-    discord_id: Optional[str] = None    # only meaningful on /usage/link
+    discord_id: str | None = None    # only meaningful on /usage/link
 
 
 @app.post("/usage/check")

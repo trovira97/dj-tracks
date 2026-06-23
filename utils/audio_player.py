@@ -14,10 +14,11 @@ import and the cost is paid only the first time the user clicks play.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
 log = logging.getLogger("dj_tracks.player")
 
@@ -57,7 +58,7 @@ def _read_tags(filepath: Path) -> tuple[str, str]:
     return title, artist
 
 
-def _read_cover_bytes(filepath: Path) -> Optional[bytes]:
+def _read_cover_bytes(filepath: Path) -> bytes | None:
     """Return the raw image bytes of the embedded album art, or None."""
     try:
         from mutagen import File as MutagenFile
@@ -86,11 +87,11 @@ def _read_cover_bytes(filepath: Path) -> Optional[bytes]:
 class AudioPlayer:
     """Tiny pygame-backed preview player.  Thread-safe singleton."""
 
-    _instance: "Optional[AudioPlayer]" = None
+    _instance: AudioPlayer | None = None
     _instance_lock = threading.Lock()
 
     @classmethod
-    def get(cls) -> "AudioPlayer":
+    def get(cls) -> AudioPlayer:
         with cls._instance_lock:
             if cls._instance is None:
                 cls._instance = cls()
@@ -101,14 +102,14 @@ class AudioPlayer:
     def __init__(self) -> None:
         self._lock     = threading.Lock()
         self._ready    = False           # mixer initialised?
-        self._current: Optional[Path] = None
+        self._current: Path | None = None
         self._paused   = False
         self._volume   = 0.8             # 0.0 — 1.0
         self._duration = 0.0             # seconds, 0 = unknown
         self._start_pos = 0.0            # seek offset baked in on play(start=)
         self._title    = ""
         self._artist   = ""
-        self._cover_bytes: Optional[bytes] = None
+        self._cover_bytes: bytes | None = None
         # Queue support (for prev/next).  Filled by the UI layer with the
         # list of history paths so the player can walk it.
         self._queue: list[Path] = []
@@ -119,7 +120,7 @@ class AudioPlayer:
     def available(self) -> bool:
         """True if pygame is importable on this machine."""
         try:
-            import pygame                 # noqa: F401
+            import pygame  # noqa: F401
             return True
         except Exception:
             return False
@@ -256,7 +257,7 @@ class AudioPlayer:
         self._fire_state_change()
         return paused
 
-    def is_playing(self, filepath: Optional[Path] = None) -> bool:
+    def is_playing(self, filepath: Path | None = None) -> bool:
         """
         True when *filepath* (or any file, if omitted) is currently the
         active track and the mixer is producing audio.
@@ -277,7 +278,7 @@ class AudioPlayer:
                 return False
 
     @property
-    def current(self) -> Optional[Path]:
+    def current(self) -> Path | None:
         return self._current
 
     @property
@@ -293,7 +294,7 @@ class AudioPlayer:
         return self._artist
 
     @property
-    def cover_bytes(self) -> Optional[bytes]:
+    def cover_bytes(self) -> bytes | None:
         return self._cover_bytes
 
     # ── Queue / next / prev ─────────────────────────────────────────────────
@@ -340,7 +341,7 @@ class AudioPlayer:
         if not self._queue or self._queue_idx < 0:
             return False
         return any(self._queue[i].exists()
-                   for i in range(0, self._queue_idx))
+                   for i in range(self._queue_idx))
 
     # ── Observers ────────────────────────────────────────────────────────────
 
@@ -350,7 +351,5 @@ class AudioPlayer:
 
     def _fire_state_change(self) -> None:
         for cb in list(self._on_state_change):
-            try:
+            with contextlib.suppress(Exception):
                 cb()
-            except Exception:
-                pass

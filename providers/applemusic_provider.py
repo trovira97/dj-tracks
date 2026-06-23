@@ -5,7 +5,6 @@ Proveedor Apple Music — búsqueda y metadatos via iTunes Search API (pública)
 from __future__ import annotations
 
 import re
-from typing import List, Optional
 
 import requests
 
@@ -66,7 +65,7 @@ class AppleMusicProvider(MusicProvider):
             total_tracks = item.get("trackCount", 0) or 0,
         )
 
-    def _extract_apple_id(self, url: str) -> Optional[str]:
+    def _extract_apple_id(self, url: str) -> str | None:
         """Extrae el ID numérico de una URL de Apple Music."""
         # /album/name/123456?i=789 → 789 es el trackId
         m = re.search(r"[?&]i=(\d+)", url)
@@ -78,7 +77,7 @@ class AppleMusicProvider(MusicProvider):
 
     # ── MusicProvider interface ────────────────────────────────────────────────
 
-    def search(self, query: str, limit: int = 10) -> List[TrackInfo]:
+    def search(self, query: str, limit: int = 10) -> list[TrackInfo]:
         try:
             r = self._session.get(
                 self.ITUNES_SEARCH,
@@ -93,7 +92,7 @@ class AppleMusicProvider(MusicProvider):
             log.error(f"[AppleMusic] Error en búsqueda: {e}")
             return []
 
-    def search_albums(self, query: str, limit: int = 10) -> List[TrackInfo]:
+    def search_albums(self, query: str, limit: int = 10) -> list[TrackInfo]:
         """Search albums.  The album's collectionViewUrl resolves to all its
         tracks via :meth:`get_tracks_from_url`."""
         try:
@@ -107,7 +106,7 @@ class AppleMusicProvider(MusicProvider):
         except Exception as e:
             log.error(f"[AppleMusic] Error en búsqueda de álbumes: {e}")
             return []
-        out: List[TrackInfo] = []
+        out: list[TrackInfo] = []
         for it in items:
             if it.get("wrapperType") != "collection":
                 continue
@@ -126,7 +125,7 @@ class AppleMusicProvider(MusicProvider):
             ))
         return out
 
-    def get_track(self, url_or_id: str) -> Optional[TrackInfo]:
+    def get_track(self, url_or_id: str) -> TrackInfo | None:
         try:
             aid = (self._extract_apple_id(url_or_id) if url_or_id.startswith("http")
                    else url_or_id)
@@ -145,7 +144,7 @@ class AppleMusicProvider(MusicProvider):
             log.error(f"[AppleMusic] Error al obtener track: {e}")
         return None
 
-    def get_tracks_from_url(self, url: str) -> List[TrackInfo]:
+    def get_tracks_from_url(self, url: str) -> list[TrackInfo]:
         """
         Procesa URLs de Apple Music.
         - Song:     music.apple.com/es/album/name/id?i=trackid

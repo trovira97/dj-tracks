@@ -9,6 +9,7 @@ process dies during the write, the original file stays intact.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -41,10 +42,8 @@ def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
         os.replace(tmp, path)
     except Exception:
         # Clean up the stray .tmp on failure.
-        try:
+        with contextlib.suppress(FileNotFoundError):
             tmp.unlink()
-        except FileNotFoundError:
-            pass
         raise
 
 
