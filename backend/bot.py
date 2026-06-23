@@ -50,6 +50,61 @@ class DJTracksBot(discord.Client):
         except Exception as exc:
             log.warning(f"[Bot] could not set presence: {exc}")
 
+    async def on_member_update(self,
+                                before: discord.Member,
+                                after:  discord.Member) -> None:
+        """Detect when the Donor role is added or removed (manually by
+        an admin, via the !donate flow, or any other way) and keep our
+        donors table in sync in real time.
+
+        This is the path the project owner uses when granting free
+        access to friends: assign the role in Discord by hand, and the
+        bot mirrors it into the DB so the next /usage/check from that
+        friend's machine returns is_donor=true automatically.
+        """
+        if before.guild.id != DISCORD_GUILD_ID:
+            return
+        had = any(r.id == DISCORD_DONOR_ROLE_ID for r in before.roles)
+        has = any(r.id == DISCORD_DONOR_ROLE_ID for r in after.roles)
+        if had == has:
+            return
+
+        from app import db
+        import time
+        now = int(time.time())
+        discord_id = str(after.id)
+
+        if has:
+            with db() as c:
+                c.execute(
+                    "INSERT OR REPLACE INTO donors "
+                    "(discord_id, username, email, amount, "
+                    " first_seen, last_seen) VALUES (?, ?, "
+                    " (SELECT email FROM donors WHERE discord_id = ?), "
+                    " (SELECT amount FROM donors WHERE discord_id = ?), "
+                    " COALESCE((SELECT first_seen FROM donors WHERE discord_id = ?), ?), "
+                    " ?)",
+                    (discord_id, after.name, discord_id, discord_id,
+                     discord_id, now, now))
+            log.info(f"[Bot] Donor role granted to {after} ({discord_id}) — "
+                     f"added to donors")
+            # Friendly DM so the user knows their access is live.
+            try:
+                await after.send(
+                    "🎉 ¡Felicidades! Has recibido el rol **Donor** en "
+                    "DJ Tracks.  Tu app ya tiene acceso ilimitado a partir "
+                    "del próximo arranque (o tras pulsar cualquier botón "
+                    "que toque el backend, en segundos)."
+                )
+            except discord.Forbidden:
+                pass
+        else:
+            with db() as c:
+                c.execute("DELETE FROM donors WHERE discord_id = ?",
+                          (discord_id,))
+            log.info(f"[Bot] Donor role removed from {after} ({discord_id}) "
+                     f"— removed from donors")
+
     async def on_message(self, message: discord.Message) -> None:
         # DM only — ignore everything in guilds.
         if message.guild is not None or message.author.bot:
@@ -174,6 +229,7 @@ class DJTracksBot(discord.Client):
 
 _intents = discord.Intents.default()
 _intents.message_content = True   # required to read DM content
+_intents.members = True           # required to receive on_member_update
 
 bot = DJTracksBot(intents=_intents)
 

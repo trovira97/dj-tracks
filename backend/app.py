@@ -123,13 +123,42 @@ def init_db() -> None:
 
 
 def _is_donor_id(discord_id: str) -> bool:
-    """Quick check: is this discord_id in the donors table?"""
+    """Quick CACHE-ONLY check: is this discord_id in the donors table?
+
+    Doesn't hit Discord — for the live-fallback variant that catches
+    manually-assigned roles, use _check_donor_status().
+    """
     if not discord_id:
         return False
     with db() as c:
         row = c.execute("SELECT 1 FROM donors WHERE discord_id = ?",
                         (discord_id,)).fetchone()
     return bool(row)
+
+
+async def _check_donor_status(discord_id: str) -> bool:
+    """Cached check + live Discord fallback.
+
+    Catches the case where the admin manually grants the Donor role
+    to a friend in Discord — our DB doesn't know yet, so on the next
+    /usage/check we ask Discord directly.  If they hold the role, we
+    persist them in the donors table so the next check is fast.
+    """
+    if not discord_id:
+        return False
+    if _is_donor_id(discord_id):
+        return True
+    has_role = await discord_member_has_role(discord_id)
+    if has_role:
+        now = int(time.time())
+        with db() as c:
+            c.execute("INSERT OR IGNORE INTO donors "
+                      "(discord_id, first_seen, last_seen) "
+                      "VALUES (?, ?, ?)",
+                      (discord_id, now, now))
+        log.info("[Donor] live role check caught manual grant: %s",
+                 discord_id)
+    return has_role
 
 
 def _usage_row(device_id: str) -> dict:
@@ -154,9 +183,10 @@ def _usage_row(device_id: str) -> dict:
                 "download_count": int(row["download_count"] or 0)}
 
 
-def _usage_summary(state: dict) -> dict:
-    """Common response shape for /usage/* endpoints."""
-    is_donor = _is_donor_id(state.get("discord_id", ""))
+def _usage_summary(state: dict, is_donor: bool) -> dict:
+    """Common response shape for /usage/* endpoints.  Caller supplies
+    is_donor — usually from _check_donor_status() so the result is
+    live-accurate."""
     count    = int(state.get("download_count", 0))
     remaining = -1 if is_donor else max(0, FREE_LIMIT - count)
     return {
@@ -239,20 +269,23 @@ class UsageBody(BaseModel):
 
 
 @app.post("/usage/check")
-def usage_check(body: UsageBody) -> dict:
+async def usage_check(body: UsageBody) -> dict:
     """Ask the server if this device may start a new download.
 
     Source of truth — the local app cannot lie about its counter.
     Donors get unlimited (remaining = -1).
+    Uses _check_donor_status so manually-assigned roles are caught
+    on the first check after the admin grants them in Discord.
     """
     if not body.device_id or len(body.device_id) < 8:
         raise HTTPException(400, "device_id required")
-    state = _usage_row(body.device_id)
-    return _usage_summary(state)
+    state    = _usage_row(body.device_id)
+    is_donor = await _check_donor_status(state.get("discord_id", ""))
+    return _usage_summary(state, is_donor)
 
 
 @app.post("/usage/record")
-def usage_record(body: UsageBody) -> dict:
+async def usage_record(body: UsageBody) -> dict:
     """Bump the per-device counter after a successful download.
 
     Donors are exempt (we still upsert the row so we can track usage
@@ -260,8 +293,9 @@ def usage_record(body: UsageBody) -> dict:
     """
     if not body.device_id or len(body.device_id) < 8:
         raise HTTPException(400, "device_id required")
-    state = _usage_row(body.device_id)
-    if not _is_donor_id(state.get("discord_id", "")):
+    state    = _usage_row(body.device_id)
+    is_donor = await _check_donor_status(state.get("discord_id", ""))
+    if not is_donor:
         new_count = int(state["download_count"]) + 1
         with db() as c:
             c.execute(
@@ -269,11 +303,11 @@ def usage_record(body: UsageBody) -> dict:
                 "WHERE device_id = ?",
                 (new_count, int(time.time()), body.device_id))
         state["download_count"] = new_count
-    return _usage_summary(state)
+    return _usage_summary(state, is_donor)
 
 
 @app.post("/usage/link")
-def usage_link(body: UsageBody) -> dict:
+async def usage_link(body: UsageBody) -> dict:
     """Bind a device to a Discord user (called after a successful
     OAuth so future /usage/check calls know the user is a donor)."""
     if not body.device_id or len(body.device_id) < 8:
@@ -286,8 +320,9 @@ def usage_link(body: UsageBody) -> dict:
             "UPDATE usage SET discord_id = ?, last_seen = ? "
             "WHERE device_id = ?",
             (body.discord_id, int(time.time()), body.device_id))
-    state = _usage_row(body.device_id)
-    return _usage_summary(state)
+    state    = _usage_row(body.device_id)
+    is_donor = await _check_donor_status(state.get("discord_id", ""))
+    return _usage_summary(state, is_donor)
 
 
 # ── /verify — desktop app polls this ───────────────────────────────────────

@@ -3372,10 +3372,26 @@ class DjTracksDwCrackApp:
         self._show_panel("dashboard")
         self._bind_shortcuts()
 
+        # Mandatory Discord login on first run.  Once linked, the
+        # discord_user_id is persisted and the screen never appears
+        # again — we just refresh donor status silently in background.
+        from utils.donor_gate import get_state
+        if not get_state().get("discord_user_id"):
+            # Slight delay so the main window is fully painted underneath
+            # the modal — looks cleaner than a hard-flash.
+            self._root.after(200, self._show_startup_login)
+
         # Background update check on startup (toggleable, default ON).
         # Runs ~3 s after the window is up so it never delays the splash.
         if self._ctrl._config.get("check_updates_on_startup", True):
             self._root.after(3000, self._kick_startup_update_check)
+
+    def _show_startup_login(self) -> None:
+        """Show the mandatory Discord login modal."""
+        if getattr(self, "_startup_login_win", None) and \
+                self._startup_login_win.winfo_exists():
+            return
+        self._startup_login_win = StartupLoginScreen(self._root, self)
 
     def _kick_startup_update_check(self) -> None:
         """Background GitHub poll on launch.  Quiet on failure; shows
@@ -3823,6 +3839,165 @@ class LockoutDialog(ctk.CTkToplevel):
                 text="No te encontramos el rol Donor todavía. Si acabas de "
                      "donar, espera unos segundos y vuelve a intentarlo.",
                 text_color=C["warning"])
+
+    def _close(self) -> None:
+        if self._poll_id is not None:
+            try:
+                self.after_cancel(self._poll_id)
+            except Exception:
+                pass
+            self._poll_id = None
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        self.destroy()
+
+
+class StartupLoginScreen(ctk.CTkToplevel):
+    """Mandatory Discord-link modal shown on the very first launch.
+
+    Blocks access to the main UI until the user either authenticates
+    against Discord (we then know their discord_user_id forever) or
+    quits the app.  Pre-linking everyone means donations later don't
+    need an OAuth step — Ko-fi's email-based matching just works.
+    """
+
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self._app = app
+        self.title("DJ Tracks · Iniciar sesión")
+        self.geometry("520x520")
+        self.resizable(False, False)
+        self.configure(fg_color=C["bg"])
+        try:
+            self.transient(parent)
+            self.grab_set()       # blocks the main window
+        except Exception:
+            pass
+        self._poll_id: Optional[str] = None
+        self._oauth_token: str = ""
+        self._build()
+        # ESC closes the whole app (same as the X), no quiet dismiss.
+        self.bind("<Escape>", lambda _e: self._quit_app())
+        self.protocol("WM_DELETE_WINDOW", self._quit_app)
+
+    def _build(self) -> None:
+        body = ctk.CTkFrame(self, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=30, pady=24)
+
+        # Big icon at top
+        ctk.CTkLabel(body, text="🎧",
+                     font=_font(56), text_color=C["accent"]
+                     ).pack(pady=(10, 6))
+
+        ctk.CTkLabel(body, text="Bienvenido a DJ Tracks",
+                     font=_font(18, "bold"),
+                     text_color=C["text"]).pack()
+        ctk.CTkLabel(body, text=f"v{__version__}",
+                     font=_font(10), text_color=C["text_dim"]
+                     ).pack(pady=(0, 16))
+
+        ctk.CTkLabel(
+            body,
+            text="Para usar la app necesitas vincular tu cuenta de Discord.\n"
+                 "Tarda 10 segundos y solo se hace una vez.",
+            font=_font(11), text_color=C["text_mid"],
+            wraplength=440, justify="center",
+        ).pack(pady=(0, 14))
+
+        # Three short bullet reasons
+        reasons = ctk.CTkFrame(body, fg_color=C["surface"],
+                               corner_radius=10)
+        reasons.pack(fill="x", pady=(0, 18))
+        for emoji, text in [
+            ("✓", "Acceso al server de la comunidad y soporte"),
+            ("✓", "Si donas más adelante, el rol Donor se asigna "
+                  "automáticamente sin pasos extra"),
+            ("✓", "Solo pedimos identify + email — no escribimos nada "
+                  "en tu Discord"),
+        ]:
+            row = ctk.CTkFrame(reasons, fg_color="transparent")
+            row.pack(fill="x", padx=12, pady=6)
+            ctk.CTkLabel(row, text=emoji, font=_font(12, "bold"),
+                         text_color=C["accent"], width=20).pack(side="left")
+            ctk.CTkLabel(row, text=text, font=_font(10),
+                         text_color=C["text_mid"], wraplength=380,
+                         justify="left", anchor="w").pack(side="left",
+                                                          fill="x", expand=True)
+
+        # Login button
+        ctk.CTkButton(body, text="🔗  Iniciar sesión con Discord",
+                      height=44, font=_font(13, "bold"),
+                      fg_color=C["accent"], hover_color=C["accent_dim"],
+                      text_color=C["bg"], corner_radius=10,
+                      command=self._login).pack(fill="x", pady=(0, 8))
+
+        # Quit button — explicit escape hatch for users who really don't want to
+        ctk.CTkButton(body, text="Salir",
+                      height=30, font=_font(10),
+                      fg_color="transparent", hover_color=C["surface"],
+                      text_color=C["text_dim"], corner_radius=6,
+                      command=self._quit_app).pack(fill="x")
+
+        self._status_lbl = ctk.CTkLabel(body, text="",
+                                        font=_font(10),
+                                        text_color=C["text_dim"],
+                                        wraplength=440)
+        self._status_lbl.pack(pady=(14, 0))
+
+    # ── Actions ─────────────────────────────────────────────────────────────
+    def _login(self) -> None:
+        import uuid
+        from utils import donor_client
+        self._oauth_token = uuid.uuid4().hex
+        opened = donor_client.open_oauth_flow(self._oauth_token)
+        if not opened:
+            self._status_lbl.configure(
+                text="No se pudo abrir el navegador.  Comprueba tu "
+                     "configuración o reinicia la aplicación.",
+                text_color=C["error"])
+            return
+        self._status_lbl.configure(
+            text="🔄 Esperando confirmación en el navegador…",
+            text_color=C["accent"])
+        self._schedule_poll()
+
+    def _schedule_poll(self, delay_ms: int = 2000) -> None:
+        if self._poll_id is not None:
+            return
+        self._poll_id = self.after(delay_ms, self._poll)
+
+    def _poll(self) -> None:
+        self._poll_id = None
+        if not self.winfo_exists():
+            return
+        from utils import donor_client, donor_gate
+        result = donor_client.poll_oauth_result(self._oauth_token)
+        if result is None:
+            self._schedule_poll(2500)
+            return
+        donor_gate.set_donor(
+            bool(result.get("donor", False)),
+            discord_user_id  = result.get("discord_user_id", ""),
+            discord_username = result.get("discord_username", ""),
+        )
+        username = result.get("discord_username", "")
+        self._status_lbl.configure(
+            text=f"✓ Vinculado como {username}.  Abriendo la app…",
+            text_color=C["success"])
+        self.after(1200, self._close)
+
+    def _quit_app(self) -> None:
+        """User declined to log in — close the whole app."""
+        try:
+            self._app._root.destroy()
+        except Exception:
+            try:
+                import sys
+                sys.exit(0)
+            except Exception:
+                pass
 
     def _close(self) -> None:
         if self._poll_id is not None:
