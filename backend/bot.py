@@ -19,10 +19,12 @@ both HTTP and Discord at the same time.
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import os
 import re
+import time
 
 import discord
 
@@ -49,6 +51,9 @@ ACCENT_COLOR = 0x00C8FF      # cyan, matches the app
 
 
 class DJTracksBot(discord.Client):
+    # Background tasks — launched once on first on_ready, cancelled on close.
+    _bg_tasks: list[asyncio.Task] = []
+
     async def on_ready(self) -> None:
         log.info(f"[Bot] Logged in as {self.user} (id={self.user.id})")
         try:
@@ -58,6 +63,20 @@ class DJTracksBot(discord.Client):
             )
         except Exception as exc:
             log.warning(f"[Bot] could not set presence: {exc}")
+
+        # Launch background loops once — on_ready can fire again after a
+        # reconnect, and we don't want duplicate schedulers.
+        if not self._bg_tasks:
+            import scheduler
+            self._bg_tasks.append(asyncio.create_task(
+                scheduler.weekly_digest_loop(self, DISCORD_GUILD_ID),
+                name="weekly_digest",
+            ))
+            self._bg_tasks.append(asyncio.create_task(
+                scheduler.health_monitor_loop(self),
+                name="health_monitor",
+            ))
+            log.info("[Bot] background tasks started: digest + health")
 
     async def on_member_join(self, member: discord.Member) -> None:
         """Warm welcome for every new arrival.
@@ -69,6 +88,16 @@ class DJTracksBot(discord.Client):
         """
         if member.guild.id != DISCORD_GUILD_ID or member.bot:
             return
+
+        # ── Log join for the weekly digest.
+        with contextlib.suppress(Exception):
+            from app import db
+            with db() as c:
+                c.execute(
+                    "INSERT INTO member_events (user_id, username, event, ts) "
+                    "VALUES (?, ?, 'join', ?)",
+                    (str(member.id), str(member), int(time.time())),
+                )
 
         # ── Public greeting in #welcome (Discord's designated system
         #    channel — user picks which one via Server Settings).
@@ -143,6 +172,19 @@ class DJTracksBot(discord.Client):
             log.info(f"[Bot] can't DM {member} — DMs closed")
         except Exception as exc:
             log.warning(f"[Bot] welcome DM failed: {exc}")
+
+    async def on_member_remove(self, member: discord.Member) -> None:
+        """Log leaves for the weekly digest."""
+        if member.guild.id != DISCORD_GUILD_ID or member.bot:
+            return
+        with contextlib.suppress(Exception):
+            from app import db
+            with db() as c:
+                c.execute(
+                    "INSERT INTO member_events (user_id, username, event, ts) "
+                    "VALUES (?, ?, 'leave', ?)",
+                    (str(member.id), str(member), int(time.time())),
+                )
 
     async def on_member_update(self,
                                 before: discord.Member,
@@ -219,8 +261,9 @@ class DJTracksBot(discord.Client):
         if (message.guild is not None
                 and not message.author.bot
                 and message.type == discord.MessageType.default
-                and "-ayuda" in message.channel.name
-                and self._faq_rate_limit_ok(message.author.id)):
+                and "-ayuda" in message.channel.name):
+            # Always log for analytics; the reply itself is rate-limited
+            # inside _maybe_answer_faq to avoid spamming a single user.
             await self._maybe_answer_faq(message)
 
         # DM only — ignore everything else in guilds.
@@ -333,7 +376,27 @@ class DJTracksBot(discord.Client):
         try:
             from faq_responder import match as match_faq
             entry = match_faq(message.content)
+
+            # Log every question we saw — matched or not — for the
+            # weekly digest's "top unmatched questions" list.
+            with contextlib.suppress(Exception):
+                from app import db
+                with db() as c:
+                    c.execute(
+                        "INSERT INTO faq_events "
+                        "(user_id, username, message, matched_title, ts) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (str(message.author.id),
+                         str(message.author),
+                         message.content[:500],
+                         entry.title if entry else None,
+                         int(time.time())),
+                    )
+
             if not entry:
+                return
+            # Rate-limit the reply (not the logging above).
+            if not self._faq_rate_limit_ok(message.author.id):
                 return
             embed = discord.Embed(
                 title=f"💡  {entry.title}",

@@ -117,6 +117,30 @@ def init_db() -> None:
                 ON donors(email);
             CREATE INDEX IF NOT EXISTS idx_usage_discord
                 ON usage(discord_id);
+
+            -- Community analytics — powers the weekly digest.
+            CREATE TABLE IF NOT EXISTS member_events (
+                id       INTEGER PRIMARY KEY,
+                user_id  TEXT,
+                username TEXT,
+                event    TEXT,     -- 'join' or 'leave'
+                ts       INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_member_events_ts
+                ON member_events(ts);
+
+            -- Every question the FAQ responder saw — matched or not.
+            -- Unmatched rows feed the "missing FAQ" list in the digest.
+            CREATE TABLE IF NOT EXISTS faq_events (
+                id            INTEGER PRIMARY KEY,
+                user_id       TEXT,
+                username      TEXT,
+                message       TEXT,
+                matched_title TEXT,  -- NULL when nothing matched
+                ts            INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_faq_events_ts
+                ON faq_events(ts);
         """)
 
 
