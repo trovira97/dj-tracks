@@ -212,6 +212,17 @@ class DJTracksBot(discord.Client):
                 pass
             return
 
+        # ── Auto-FAQ in the help channel ──────────────────────────────
+        # Rule-based responder: matches keywords in the user's message
+        # against a small knowledge base.  Rate-limited per user so we
+        # don't spam a single member with repeated auto-replies.
+        if (message.guild is not None
+                and not message.author.bot
+                and message.type == discord.MessageType.default
+                and "-ayuda" in message.channel.name
+                and self._faq_rate_limit_ok(message.author.id)):
+            await self._maybe_answer_faq(message)
+
         # DM only — ignore everything else in guilds.
         if message.guild is not None or message.author.bot:
             return
@@ -301,6 +312,41 @@ class DJTracksBot(discord.Client):
             log.info(f"[Bot] could not DM {user} — DMs closed")
         except Exception as exc:
             log.error(f"[Bot] fixrole error for {user}: {exc}")
+
+    # ── Auto-FAQ (used from on_message in #ayuda) ─────────────────────────
+    _faq_last_reply: dict[int, float] = {}     # user_id → unix ts
+    _FAQ_COOLDOWN_SEC: float = 300              # 5 min per user
+
+    def _faq_rate_limit_ok(self, user_id: int) -> bool:
+        import time
+        last = self._faq_last_reply.get(user_id, 0.0)
+        now = time.time()
+        if now - last < self._FAQ_COOLDOWN_SEC:
+            return False
+        self._faq_last_reply[user_id] = now
+        return True
+
+    async def _maybe_answer_faq(self, message: discord.Message) -> None:
+        """Match the message against the FAQ knowledge base and reply if
+        we find a canned answer.  Silent otherwise — better to let a mod
+        handle unrecognised questions than reply with garbage."""
+        try:
+            from faq_responder import match as match_faq
+            entry = match_faq(message.content)
+            if not entry:
+                return
+            embed = discord.Embed(
+                title=f"💡  {entry.title}",
+                description=entry.answer,
+                color=ACCENT_COLOR,
+            )
+            embed.set_footer(
+                text=("Respuesta automática · si no resuelve tu duda, "
+                      "un mod te ayudará"))
+            await message.reply(embed=embed, mention_author=False)
+            log.info(f"[FAQ] auto-answered {message.author}: {entry.title}")
+        except Exception as exc:
+            log.warning(f"[FAQ] failed to auto-answer: {exc}")
 
     async def _handle_help(self, user: discord.User) -> None:
         embed = discord.Embed(
