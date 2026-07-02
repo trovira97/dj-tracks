@@ -59,6 +59,91 @@ class DJTracksBot(discord.Client):
         except Exception as exc:
             log.warning(f"[Bot] could not set presence: {exc}")
 
+    async def on_member_join(self, member: discord.Member) -> None:
+        """Warm welcome for every new arrival.
+
+        Two-pronged: a public embed in the welcome channel with @mention
+        (so they feel greeted), plus a private DM with quick-start
+        info they can bookmark.  DM gracefully skipped when the user
+        has DMs from bots disabled.
+        """
+        if member.guild.id != DISCORD_GUILD_ID or member.bot:
+            return
+
+        # ── Public greeting in #welcome (Discord's designated system
+        #    channel — user picks which one via Server Settings).
+        try:
+            welcome_channel = (
+                member.guild.system_channel
+                or discord.utils.find(
+                    lambda c: "bienvenida" in c.name.lower()
+                              and isinstance(c, discord.TextChannel),
+                    member.guild.channels,
+                )
+            )
+            if welcome_channel:
+                public = discord.Embed(
+                    title=f"¡Bienvenido, {member.display_name}! 🎧",
+                    description=(
+                        f"Un miembro más en la comunidad — ya somos "
+                        f"**{member.guild.member_count}**. "
+                        f"Preséntate en <#PLACEHOLDER_GENERAL> cuando quieras."
+                    ),
+                    color=ACCENT_COLOR,
+                )
+                public.set_thumbnail(url=member.display_avatar.url)
+                # Fix the general channel mention on the fly.
+                gen = discord.utils.find(
+                    lambda c: c.name.endswith("-general"),
+                    member.guild.text_channels)
+                if gen:
+                    public.description = public.description.replace(
+                        "<#PLACEHOLDER_GENERAL>", gen.mention)
+                await welcome_channel.send(
+                    content=member.mention, embed=public)
+        except discord.Forbidden:
+            log.info("[Bot] no permission to greet in welcome channel")
+        except Exception as exc:
+            log.warning(f"[Bot] welcome greeting failed: {exc}")
+
+        # ── Private DM with quick-start info.
+        try:
+            dm = discord.Embed(
+                title="🎧  ¡Bienvenido a DJ Tracks!",
+                color=ACCENT_COLOR,
+                description=(
+                    "Gracias por unirte a la comunidad.  Aquí tienes "
+                    "todo lo que necesitas para empezar:"
+                ),
+            )
+            dm.add_field(
+                name="📦  Descargar la app",
+                value="https://github.com/trovira97/dj-tracks/releases/latest",
+                inline=False,
+            )
+            dm.add_field(
+                name="🙋  Pedir ayuda",
+                value="Escribe en el canal `#🙋-ayuda` — respondemos rápido.",
+                inline=False,
+            )
+            dm.add_field(
+                name="💎  Desbloquear acceso ilimitado",
+                value=("Escríbeme `!donate <€>` por DM y te paso un enlace "
+                       "Ko-fi personalizado."),
+                inline=False,
+            )
+            dm.add_field(
+                name="🐛  Reportar un bug",
+                value="https://github.com/trovira97/dj-tracks/issues/new/choose",
+                inline=False,
+            )
+            dm.set_footer(text="DJ Tracks · ¡Nos vemos en el server!")
+            await member.send(embed=dm)
+        except discord.Forbidden:
+            log.info(f"[Bot] can't DM {member} — DMs closed")
+        except Exception as exc:
+            log.warning(f"[Bot] welcome DM failed: {exc}")
+
     async def on_member_update(self,
                                 before: discord.Member,
                                 after:  discord.Member) -> None:
