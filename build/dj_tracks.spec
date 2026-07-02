@@ -15,10 +15,13 @@ Bundles:
 Build with:
     py -m PyInstaller --noconfirm --clean build/dj_tracks.spec
 """
+import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_all
 
 ROOT = Path(SPECPATH).parent
+IS_WINDOWS = sys.platform.startswith("win")
+IS_MAC     = sys.platform == "darwin"
 
 # ── tls_client — native DLL must be bundled explicitly ───────────────────────
 # spotdl installs tls_client, which carries a native DLL
@@ -49,8 +52,13 @@ datas += _tls_datas
 datas += _sd_datas
 
 # ffmpeg goes to the bundle root so audio_downloader._find_ffmpeg picks it up.
-if (ROOT / "ffmpeg.exe").exists():
+# On Windows we bundle ffmpeg.exe directly.  On macOS/Linux we assume
+# the user has ffmpeg installed via Homebrew / apt / dnf — the downloader
+# falls back to shutil.which("ffmpeg") if the bundled binary is absent.
+if IS_WINDOWS and (ROOT / "ffmpeg.exe").exists():
     datas.append((str(ROOT / "ffmpeg.exe"), "."))
+elif (ROOT / "ffmpeg").exists() and not IS_WINDOWS:
+    datas.append((str(ROOT / "ffmpeg"), "."))
 
 # Icons and logos.
 if (ROOT / "assets").exists():
@@ -104,7 +112,13 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data)
 
-icon_path = ROOT / "assets" / "icon.ico"
+# Icon: .ico on Windows, .icns on macOS, .png as universal fallback.
+if IS_WINDOWS:
+    icon_path = ROOT / "assets" / "icon.ico"
+elif IS_MAC:
+    icon_path = ROOT / "assets" / "icon.icns"
+else:
+    icon_path = ROOT / "assets" / "icon.png"
 
 exe = EXE(
     pyz,
@@ -131,3 +145,17 @@ coll = COLLECT(
     upx_exclude=[],
     name="DJ Tracks",
 )
+
+# macOS: wrap the bundle in a proper .app.
+if IS_MAC:
+    app = BUNDLE(
+        coll,
+        name="DJ Tracks.app",
+        icon=str(icon_path) if icon_path.exists() else None,
+        bundle_identifier="com.trovira97.djtracks",
+        info_plist={
+            "CFBundleShortVersionString": "2.2.0",
+            "NSHighResolutionCapable": True,
+            "LSMinimumSystemVersion": "11.0",
+        },
+    )

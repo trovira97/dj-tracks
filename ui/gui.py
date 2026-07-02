@@ -1482,9 +1482,27 @@ class SearchPanel(ctk.CTkFrame):
         breakdown = "  ·  " + "  ".join(parts) if parts else ""
         n_alb = sum(1 for t in results if getattr(t, "is_album", False))
         alb_txt = f"  ·  💿 {n_alb} álbum{'es' if n_alb != 1 else ''}" if n_alb else ""
+
+        # Library dedup — surface "already have" count so the user can see
+        # at a glance how much of a playlist they haven't downloaded yet.
+        # Only meaningful when there's a batch (>3 results).
+        # The index is populated at app startup by the main App class.
+        lib_txt = ""
+        if len(results) > 3:
+            try:
+                from core.library_index import get_library_index
+                idx = get_library_index()
+                if len(idx) > 0:
+                    missing = idx.missing(results)
+                    already = len(results) - len(missing)
+                    if already:
+                        lib_txt = f"  ·  ✓ {already} ya lo tienes"
+            except Exception:
+                pass
+
         n = len(results)
         self._status_lbl.configure(
-            text=f"{n} resultado{'s' if n != 1 else ''}{breakdown}{alb_txt}"
+            text=f"{n} resultado{'s' if n != 1 else ''}{breakdown}{alb_txt}{lib_txt}"
                  "  —  ＋ añadir · ☑ marca varias",
             text_color=C["success"])
 
@@ -1682,6 +1700,14 @@ class DownloadPanel(ctk.CTkFrame):
 
         if task.status in (DownloadStatus.DONE, DownloadStatus.ERROR):
             self._history.add_from_task(task)
+            # Refresh the library dedup index so the next URL resolution
+            # picks up the fresh download.  Skipped on failed downloads.
+            if task.status == DownloadStatus.DONE:
+                try:
+                    from core.library_index import get_library_index
+                    get_library_index().rebuild(history_manager=self._history)
+                except Exception:
+                    pass
 
         # Fire the completion callback exactly once per task.
         if task.status == DownloadStatus.DONE and task.task_id not in self._completed_ids:
@@ -1776,6 +1802,11 @@ class HistoryPanel(ctk.CTkFrame):
                       fg_color=C["surface"], hover_color=C["card_hover"],
                       text_color=C["text_mid"], corner_radius=5,
                       command=self._export_csv).pack(side="right")
+        # Rekordbox / Traktor / M3U8 export — writes all three side-by-side.
+        ctk.CTkButton(hdr, text="DJ", width=50, height=26, font=_font(9, "bold"),
+                      fg_color=C["accent"], hover_color=C["accent_dim"],
+                      text_color="#000", corner_radius=5,
+                      command=self._export_dj).pack(side="right", padx=(4, 0))
 
         filters = ctk.CTkFrame(self, fg_color="transparent")
         filters.pack(fill="x", padx=20, pady=(8, 0))
@@ -1910,6 +1941,43 @@ class HistoryPanel(ctk.CTkFrame):
             initialfile="dj_tracks_historial.json")
         if path:
             self._history.export_json(Path(path))
+
+    def _export_dj(self) -> None:
+        """Export the history to Rekordbox XML + Traktor NML + M3U8.
+
+        Writes all three formats into a folder the user picks — one
+        click, three DJ software libraries updated.  Only tracks whose
+        file still exists on disk are included.
+        """
+        from core.dj_export import export_all, records_from_history
+        from tkinter import messagebox
+
+        folder = filedialog.askdirectory(
+            title="Elige la carpeta donde exportar (Rekordbox + Traktor + M3U8)",
+            initialdir=str(Path.home()),
+        )
+        if not folder:
+            return
+        try:
+            records = records_from_history(self._history)
+            if not records:
+                messagebox.showinfo(
+                    "Exportar a DJ software",
+                    "No hay descargas completadas con archivos en disco.",
+                )
+                return
+            counts = export_all(records, Path(folder), name_stem="DJ Tracks")
+            messagebox.showinfo(
+                "Exportar a DJ software",
+                f"Exportados {counts['rekordbox']} tracks a los 3 formatos:\n\n"
+                f"• DJ Tracks.xml — importa en Rekordbox\n"
+                f"• DJ Tracks.nml — arrastra a Traktor\n"
+                f"• DJ Tracks.m3u8 — universal (Serato, VirtualDJ, VLC)\n\n"
+                f"Carpeta: {folder}",
+            )
+        except Exception as exc:
+            messagebox.showerror("Exportar a DJ software",
+                                 f"Error durante la exportación:\n{exc}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3485,6 +3553,15 @@ class DjTracksDwCrackApp:
     def __init__(self, controller: AppController) -> None:
         self._ctrl    = controller
         self._history = HistoryManager()
+
+        # Build the local-library dedup index from history.  Cheap for a
+        # normal user's ~few-hundred track library, and needed before the
+        # first URL resolution so the "ya lo tienes" badge is accurate.
+        try:
+            from core.library_index import get_library_index
+            get_library_index().rebuild(history_manager=self._history)
+        except Exception:
+            pass  # Non-critical — search still works, just no dedup badge.
 
         saved_theme = controller.get_config("theme", "Dark Pro")
         apply_theme(saved_theme)

@@ -1,8 +1,8 @@
 name: Release
 
-# Triggers when a tag matching v*.*.* is pushed.  Builds the Windows
-# bundle with PyInstaller, zips it, and attaches it to a fresh GitHub
-# release.  No manual zipping / uploading.
+# Triggers when a tag matching v*.*.* is pushed.  Builds the app with
+# PyInstaller on Windows / macOS / Linux, zips (or DMG-s / tar.gzs) each
+# bundle, and attaches all three to a fresh GitHub release.
 on:
   push:
     tags:
@@ -12,15 +12,37 @@ permissions:
   contents: write     # required to create the release + upload assets
 
 jobs:
-  build-windows:
-    name: Build · Windows
-    runs-on: windows-latest
-
+  # ───────────────────────────────────────────────────────────────────────
+  # Version check runs once so all three build jobs share the same result.
+  # ───────────────────────────────────────────────────────────────────────
+  verify:
+    name: Verify tag matches __version__
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+      - id: check
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          ver=$(grep -oP '__version__\s*=\s*"\K[^"]+' __version__.py)
+          if [ "$tag" != "$ver" ]; then
+            echo "::error::Tag $tag != __version__ $ver"
+            exit 1
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "Tag and __version__ both at $ver"
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+  # ───────────────────────────────────────────────────────────────────────
+  # Windows build — kept as-is (this has shipped v2.2.0 already).
+  # ───────────────────────────────────────────────────────────────────────
+  build-windows:
+    needs: verify
+    name: Build · Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
@@ -31,21 +53,8 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller
 
-      - name: Confirm version matches the tag
-        shell: pwsh
-        run: |
-          $tag = "${{ github.ref_name }}".TrimStart('v')
-          $vfile = Select-String -Path __version__.py -Pattern '__version__\s*=\s*"([^"]+)"' | Select-Object -First 1
-          $ver = $vfile.Matches[0].Groups[1].Value
-          if ($tag -ne $ver) {
-            Write-Error "Tag $tag != __version__ $ver"
-            exit 1
-          }
-          Write-Host "Tag and __version__ both at $ver"
-
       - name: Build with PyInstaller
-        run: |
-          python -m PyInstaller --noconfirm --clean --distpath dist --workpath build_temp build/dj_tracks.spec
+        run: python -m PyInstaller --noconfirm --clean --distpath dist --workpath build_temp build/dj_tracks.spec
 
       - name: Verify the .exe exists
         shell: pwsh
@@ -59,17 +68,141 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
-          Compress-Archive -Path "dist/DJ Tracks" -DestinationPath "dist/DJ Tracks $tag.zip" -CompressionLevel Optimal
-          $size = [math]::Round((Get-Item "dist/DJ Tracks $tag.zip").Length / 1MB, 1)
-          Write-Host "Zipped: $size MB"
+          Compress-Archive -Path "dist/DJ Tracks" -DestinationPath "dist/DJ Tracks $tag Windows.zip" -CompressionLevel Optimal
 
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-bundle
+          path: dist/DJ Tracks ${{ github.ref_name }} Windows.zip
+
+  # ───────────────────────────────────────────────────────────────────────
+  # macOS build — universal2 (arm64 + x86_64) via GitHub's macos-latest
+  # runner (arm64).  Produces a .app inside a .dmg for the golden path.
+  # ───────────────────────────────────────────────────────────────────────
+  build-macos:
+    needs: verify
+    name: Build · macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install ffmpeg (Homebrew)
+        run: brew install ffmpeg create-dmg
+
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: python -m PyInstaller --noconfirm --clean --distpath dist --workpath build_temp build/dj_tracks.spec
+
+      - name: Verify the .app exists
+        run: |
+          if [ ! -d "dist/DJ Tracks.app" ]; then
+            echo "::error::.app bundle not produced"
+            exit 1
+          fi
+
+      - name: Package as DMG
+        run: |
+          tag="${{ github.ref_name }}"
+          create-dmg \
+            --volname "DJ Tracks $tag" \
+            --window-size 540 380 \
+            --icon-size 100 \
+            --app-drop-link 400 190 \
+            --icon "DJ Tracks.app" 140 190 \
+            "dist/DJ Tracks $tag macOS.dmg" \
+            "dist/DJ Tracks.app" || \
+          {
+            # Fallback: plain zip if create-dmg has issues.
+            echo "create-dmg failed — falling back to zip"
+            cd dist && zip -r "DJ Tracks $tag macOS.zip" "DJ Tracks.app"
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-bundle
+          path: |
+            dist/DJ Tracks ${{ github.ref_name }} macOS.dmg
+            dist/DJ Tracks ${{ github.ref_name }} macOS.zip
+          if-no-files-found: warn
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Linux build — plain PyInstaller onedir → tar.gz.
+  # AppImage would be nicer for redistribution but adds a lot of CI
+  # complexity; the tar.gz works out-of-the-box for any distro with a
+  # recent glibc + Python-compatible libs (Ubuntu 22.04, Fedora 38+, Arch).
+  # ───────────────────────────────────────────────────────────────────────
+  build-linux:
+    needs: verify
+    name: Build · Linux
+    runs-on: ubuntu-22.04     # oldest LTS still supported = widest glibc compat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install system deps (ffmpeg + Tk runtime)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg python3-tk libxcb1 libx11-6
+
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: python -m PyInstaller --noconfirm --clean --distpath dist --workpath build_temp build/dj_tracks.spec
+
+      - name: Verify the binary exists
+        run: |
+          if [ ! -f "dist/DJ Tracks/DJ Tracks" ]; then
+            echo "::error::Linux binary not produced"
+            exit 1
+          fi
+
+      - name: Package as tar.gz
+        run: |
+          tag="${{ github.ref_name }}"
+          cd dist
+          tar -czf "DJ Tracks $tag Linux.tar.gz" "DJ Tracks"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-bundle
+          path: dist/DJ Tracks ${{ github.ref_name }} Linux.tar.gz
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Aggregate all three artifacts into one release.
+  # ───────────────────────────────────────────────────────────────────────
+  publish:
+    needs: [build-windows, build-macos, build-linux]
+    name: Publish GitHub release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List downloaded artifacts
+        run: ls -R artifacts/
+
+      - uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
-          # GitHub auto-generates release notes from PR titles since the
-          # previous tag.  If you want hand-curated notes, supply
-          # body_path: ./RELEASE_NOTES.md instead.
           generate_release_notes: true
           files: |
-            dist/DJ Tracks ${{ github.ref_name }}.zip
+            artifacts/windows-bundle/*
+            artifacts/macos-bundle/*
+            artifacts/linux-bundle/*
