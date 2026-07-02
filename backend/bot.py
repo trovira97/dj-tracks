@@ -47,6 +47,22 @@ _DONATE_RE  = re.compile(r"^!donate\s+(\d+(?:[.,]\d+)?)\s*€?\s*$", re.I)
 _FIXROLE_RE = re.compile(r"^!fixrole\s*$", re.I)
 _HELP_RE    = re.compile(r"^!(help|comandos)\s*$", re.I)
 
+# ── Koya level-up parsing ────────────────────────────────────────────────────
+# Koya announces level-ups in a template we control (dashboard).  Regex is
+# flexible enough to survive minor wording tweaks like markdown around the
+# number or Spanish/English mixed messages.
+_LEVEL_UP_RE = re.compile(r"nivel\s+\*?\*?(\d+)", re.IGNORECASE)
+
+# Milestone roles managed by our bot instead of Koya (Koya's free tier
+# doesn't allow more than a few role rewards).  Ordered lowest → highest.
+# Names must match those created by scripts/create_milestone_roles.py.
+MILESTONE_ROLES: list[tuple[int, str]] = [
+    (5,   "Miembro Activo"),
+    (20,  "Regular"),
+    (50,  "Veterano"),
+    (100, "Leyenda"),
+]
+
 ACCENT_COLOR = 0x00C8FF      # cyan, matches the app
 
 
@@ -266,6 +282,18 @@ class DJTracksBot(discord.Client):
             # inside _maybe_answer_faq to avoid spamming a single user.
             await self._maybe_answer_faq(message)
 
+        # ── Milestone role assignment on Koya level-ups ───────────────
+        # Koya announces level-ups but its free tier caps role rewards.
+        # We piggyback on the announcement: parse the level, assign the
+        # matching milestone role, and remove any lower ones (single-tier
+        # policy).  This runs alongside Koya, not against it.
+        if (message.guild is not None
+                and message.author.bot
+                and message.author.name.lower() == "koya"
+                and message.mentions
+                and _LEVEL_UP_RE.search(message.content)):
+            await self._maybe_apply_milestone(message)
+
         # DM only — ignore everything else in guilds.
         if message.guild is not None or message.author.bot:
             return
@@ -410,6 +438,82 @@ class DJTracksBot(discord.Client):
             log.info(f"[FAQ] auto-answered {message.author}: {entry.title}")
         except Exception as exc:
             log.warning(f"[FAQ] failed to auto-answer: {exc}")
+
+    # ── Milestone role assignment ──────────────────────────────────────────
+
+    @staticmethod
+    def _milestone_for_level(level: int) -> str | None:
+        """Return the milestone role name for *level*, or None if below tier 1."""
+        target = None
+        for threshold, name in MILESTONE_ROLES:
+            if level >= threshold:
+                target = name
+        return target
+
+    async def _maybe_apply_milestone(self, message: discord.Message) -> None:
+        """Parse Koya's level-up embed and grant/rotate the milestone role.
+
+        Called only when we've already verified the message is from Koya
+        and mentions a member.  Safe to invoke idempotently — no-op if the
+        user already has the correct role and nothing to remove.
+        """
+        try:
+            m = _LEVEL_UP_RE.search(message.content)
+            if not m:
+                return
+            level = int(m.group(1))
+            target_name = self._milestone_for_level(level)
+            if target_name is None:
+                return  # below level 5, no milestone yet
+
+            # First mentioned user is the level-up recipient in Koya's template.
+            mentioned = message.mentions[0]
+            guild = message.guild
+            member = guild.get_member(mentioned.id)
+            if member is None:
+                try:
+                    member = await guild.fetch_member(mentioned.id)
+                except Exception:
+                    log.warning(f"[milestone] can't fetch member {mentioned.id}")
+                    return
+
+            target_role = discord.utils.get(guild.roles, name=target_name)
+            if target_role is None:
+                log.warning(f"[milestone] role @{target_name} not found")
+                return
+
+            # Roles to remove: every milestone role the user has except the target.
+            to_remove: list[discord.Role] = []
+            for _, name in MILESTONE_ROLES:
+                if name == target_name:
+                    continue
+                r = discord.utils.get(member.roles, name=name)
+                if r is not None:
+                    to_remove.append(r)
+
+            added = False
+            if target_role not in member.roles:
+                await member.add_roles(target_role,
+                                       reason=f"Reached level {level}")
+                added = True
+                log.info(f"[milestone] +@{target_name} → {member} (nivel {level})")
+
+            if to_remove:
+                await member.remove_roles(*to_remove,
+                                          reason="Higher milestone reached")
+                log.info(
+                    f"[milestone] -{[r.name for r in to_remove]} from {member}")
+
+            if added and message.channel.permissions_for(guild.me).send_messages:
+                # Small extra flourish: a subtle reaction so the user knows
+                # our bot noticed too.  No new message — Koya already announced.
+                with contextlib.suppress(Exception):
+                    await message.add_reaction("🏅")
+
+        except discord.Forbidden:
+            log.warning(f"[milestone] Forbidden — hierarchy or perms issue")
+        except Exception as exc:
+            log.warning(f"[milestone] failed: {exc}")
 
     async def _handle_help(self, user: discord.User) -> None:
         embed = discord.Embed(
