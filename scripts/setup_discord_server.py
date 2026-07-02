@@ -365,7 +365,7 @@ async def reorder_roles(guild: discord.Guild) -> None:
             positions = {me.top_role: donor.position + 1}
             await guild.edit_role_positions(positions=positions,
                                              reason="Bootstrap ordering")
-            log.info(f"  ✓ moved bot role above Donor")
+            log.info("  ✓ moved bot role above Donor")
     except discord.Forbidden:
         log.warning("  ! can't reorder roles (missing Manage Roles?)")
     except Exception as exc:

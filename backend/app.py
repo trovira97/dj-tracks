@@ -496,6 +496,7 @@ async def kofi_webhook(request: Request) -> dict:
     # assignment succeeds — the donation itself is celebrated either way.
     try:
         import asyncio as _aio
+
         from bot import announce_donation
         _aio.create_task(announce_donation(
             name      = (payload.get("from_name") or "").strip() or "Anónimo",
