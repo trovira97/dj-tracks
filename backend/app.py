@@ -490,6 +490,23 @@ async def kofi_webhook(request: Request) -> dict:
     amount  = float(payload.get("amount") or 0)
     message = (payload.get("message") or "").strip()
 
+    # ── Public announcement (fire-and-forget) ────────────────────────
+    # Ko-fi tells us via `is_public` whether the donor wants to be shown
+    # publicly.  Respect it.  We announce regardless of whether the role
+    # assignment succeeds — the donation itself is celebrated either way.
+    try:
+        import asyncio as _aio
+        from bot import announce_donation
+        _aio.create_task(announce_donation(
+            name      = (payload.get("from_name") or "").strip() or "Anónimo",
+            amount    = amount,
+            currency  = payload.get("currency") or "EUR",
+            message   = message,
+            is_public = bool(payload.get("is_public", True)),
+        ))
+    except Exception as exc:
+        log.warning(f"[Ko-fi] announce fire-and-forget failed: {exc}")
+
     # ── Path 1: Discord ID in the message ────────────────────────────
     m = _SNOWFLAKE_RE.search(message)
     if m:

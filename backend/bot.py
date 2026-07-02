@@ -28,10 +28,18 @@ import discord
 
 log = logging.getLogger("dj_tracks.bot")
 
-DISCORD_BOT_TOKEN     = os.environ["DISCORD_BOT_TOKEN"]
-DISCORD_GUILD_ID      = int(os.environ["DISCORD_GUILD_ID"])
-DISCORD_DONOR_ROLE_ID = int(os.environ["DISCORD_DONOR_ROLE_ID"])
-KOFI_USERNAME         = os.environ.get("KOFI_USERNAME", "trovira_97")
+DISCORD_BOT_TOKEN         = os.environ["DISCORD_BOT_TOKEN"]
+DISCORD_GUILD_ID          = int(os.environ["DISCORD_GUILD_ID"])
+DISCORD_DONOR_ROLE_ID     = int(os.environ["DISCORD_DONOR_ROLE_ID"])
+KOFI_USERNAME             = os.environ.get("KOFI_USERNAME", "trovira_97")
+# Optional public-announce channel for incoming donations.  Falsy = disabled.
+KOFI_ANNOUNCE_CHANNEL_ID  = int(os.environ.get("KOFI_ANNOUNCE_CHANNEL_ID", "0") or "0")
+
+# Discord snowflake IDs (17-20 digits) are stripped from public messages
+# so we don't leak a donor's Discord ID pasted in the Ko-fi message field.
+_SNOWFLAKE_STRIP_RE = re.compile(r"\b\d{17,20}\b")
+
+_CURRENCY_SYMBOLS = {"EUR": "€", "USD": "$", "GBP": "£", "JPY": "¥"}
 
 _DONATE_RE  = re.compile(r"^!donate\s+(\d+(?:[.,]\d+)?)\s*€?\s*$", re.I)
 _FIXROLE_RE = re.compile(r"^!fixrole\s*$", re.I)
@@ -246,3 +254,72 @@ async def stop_bot() -> None:
     """Clean shutdown on FastAPI termination."""
     if not bot.is_closed():
         await bot.close()
+
+
+# ── Public donation announcer ──────────────────────────────────────────────
+#
+# Called from the Ko-fi webhook after we've processed the donation.  Posts a
+# cyan embed to the KOFI_ANNOUNCE_CHANNEL_ID channel so the community sees
+# donations rolling in — social proof + gratitude wall.
+#
+# Respects two privacy safeguards:
+#   1. Ko-fi's own ``is_public`` flag: if the donor asked to stay anonymous
+#      we skip the announcement entirely.
+#   2. Discord snowflakes are stripped from the message field before
+#      posting — that field is where donors paste their own Discord ID for
+#      us to match, and we don't want to leak IDs to the whole channel.
+
+async def announce_donation(*,
+                             name:      str,
+                             amount:    float,
+                             currency:  str = "EUR",
+                             message:   str = "",
+                             is_public: bool = True) -> bool:
+    """Post a public embed announcing a new donation.  Silent no-op when
+    KOFI_ANNOUNCE_CHANNEL_ID is unset or the donor is anonymous."""
+    if not KOFI_ANNOUNCE_CHANNEL_ID or not is_public:
+        return False
+    try:
+        channel = bot.get_channel(KOFI_ANNOUNCE_CHANNEL_ID)
+        if channel is None:
+            channel = await bot.fetch_channel(KOFI_ANNOUNCE_CHANNEL_ID)
+        if channel is None:
+            log.warning(f"[Bot] announce channel {KOFI_ANNOUNCE_CHANNEL_ID} "
+                        f"not found — skipping")
+            return False
+
+        symbol = _CURRENCY_SYMBOLS.get(currency.upper(), currency)
+        embed = discord.Embed(
+            title="💎  ¡Nueva donación!",
+            color=ACCENT_COLOR,
+            description="¡Gracias por hacer DJ Tracks posible! 🎧",
+        )
+        embed.add_field(name="Donante",
+                        value=f"**{name.strip() or 'Anónimo'}**",
+                        inline=True)
+        embed.add_field(name="Importe",
+                        value=f"**{amount:.2f}{symbol}**",
+                        inline=True)
+
+        # Optional message from the donor — stripped of any Discord ID
+        # they might have pasted (that's for us, not the world).
+        clean = _SNOWFLAKE_STRIP_RE.sub("", message or "").strip()
+        # Also collapse whitespace left over from stripping the ID.
+        clean = re.sub(r"\s{2,}", " ", clean).strip(" .,:;-—")
+        if clean and len(clean) > 2:
+            embed.add_field(name="Mensaje",
+                            value=f"_{clean[:300]}_",
+                            inline=False)
+
+        embed.set_footer(text="DJ Tracks · Ko-fi")
+
+        await channel.send(embed=embed)
+        log.info(f"[Bot] Donation announced: {name} · {amount}{symbol}")
+        return True
+    except discord.Forbidden:
+        log.warning(f"[Bot] no permission to post in channel "
+                    f"{KOFI_ANNOUNCE_CHANNEL_ID}")
+        return False
+    except Exception as exc:
+        log.error(f"[Bot] announce donation failed: {exc}")
+        return False
