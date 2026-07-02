@@ -199,7 +199,20 @@ class DJTracksBot(discord.Client):
                      f"— removed from donors")
 
     async def on_message(self, message: discord.Message) -> None:
-        # DM only — ignore everything in guilds.
+        # Silently delete Discord's "X pinned a message" system notices
+        # so the channel history stays clean.  Nothing to gain from
+        # keeping those — the pin itself is visible in the pin list.
+        if (message.guild is not None
+                and message.type == discord.MessageType.pins_add):
+            try:
+                await message.delete()
+            except discord.Forbidden:
+                pass  # bot doesn't have Manage Messages here — just ignore
+            except Exception:
+                pass
+            return
+
+        # DM only — ignore everything else in guilds.
         if message.guild is not None or message.author.bot:
             return
 
