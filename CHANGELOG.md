@@ -8,6 +8,37 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.3.0] — 2026-07-06
+
+### Added
+- **DJ software export** — one click writes your download history to
+  Rekordbox XML + Traktor NML + M3U8 playlist side-by-side.  Import
+  directly into Rekordbox (*File → Import Library*) or Traktor (drop
+  the .nml into Collection).  The M3U8 works with Serato, VirtualDJ,
+  VLC and every other player.  Button "DJ" in the History panel.
+- **Playlist library dedup** — when you paste a playlist URL,
+  the search bar surfaces "✓ N ya lo tienes" so you can see at a
+  glance how much of a big playlist is new vs already downloaded.
+  Backed by a fast in-memory index rebuilt from the download history
+  (accent/feat/remix aware — "Artist (feat. X)" matches "Artist").
+- **macOS + Linux builds** — GitHub Actions release workflow now
+  builds a `.dmg` for macOS (universal2) and a `.tar.gz` for Linux
+  alongside the Windows `.zip`.  Same tag triggers all three; each
+  runs on its own OS runner via a spec that adapts to the platform
+  (bundles `ffmpeg.exe` only on Windows, produces a `.app` bundle
+  on macOS, expects `apt install ffmpeg` on Linux).
+- **Community analytics on the bot side** — weekly digest posted to
+  `#🛡️-mod-chat` every Monday 10:00 UTC with member/donation/FAQ
+  stats + top unmatched questions worth turning into new FAQ entries.
+- **Backend health monitor** — bot pings the FastAPI health endpoint
+  every 5 min; DMs the owner after 3 consecutive misses and again
+  when the service recovers.
+- **Milestone role bridge** — piggybacks on Koya's level-up
+  announcements to assign `@Miembro Activo` / `@Regular` /
+  `@Veterano` / `@Leyenda` at levels 5 / 20 / 50 / 100.  Removes
+  lower tiers per the single-tier policy.  Free-tier alternative to
+  Koya's role rewards (which require Premium).
+
 ### Architecture
 - Project-wide audit, MIT license added, this changelog brought up to date.
 - `CONTRIBUTING.md` documenting how to work on the codebase.
