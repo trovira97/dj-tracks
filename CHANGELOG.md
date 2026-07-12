@@ -8,29 +8,18 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [2.3.3] — 2026-07-12
-
-### Fixed
-- **Bandcamp bot-protection** — Bandcamp's public search API started
-  returning HTML challenge pages (Cloudflare) in mid-2026, which the
-  provider was blindly trying to parse as JSON, spamming
-  `Expecting value: line 1 column 1 (char 0)` errors into the logs on
-  every search.  Now detects the HTML content-type upfront, disables
-  Bandcamp for the session with a single warning, and returns clean
-  empty results.  Other providers keep working normally.
-
-## [2.3.2] — 2026-07-12
-
 ### Fixed
 - **404s no longer kill the download** — a SoundCloud 404 (track
   removed / DMCA / never existed on SC) used to leave the row in a
   permanent "No se encontró el contenido" error state.  It now
   triggers the cross-platform retry, which searches the same track
-  on YouTube / Apple Music / Bandcamp automatically.  The original
-  design excluded 404 from the "irrecoverable" set on the theory
-  that retrying might work, but in practice 404 from a metadata-
-  derived search URL is always permanent; switching platforms is
-  always the better default.
+  on YouTube / Apple Music / Bandcamp automatically.
+- **Bandcamp bot-protection** — Bandcamp's public search API started
+  returning HTML challenge pages (Cloudflare), which the provider was
+  blindly parsing as JSON and spamming
+  `Expecting value: line 1 column 1 (char 0)` errors on every search.
+  Now detects the HTML content-type upfront, disables Bandcamp for
+  the session with a single warning, and returns clean empty results.
 
 ## [2.3.1] — 2026-07-12
 
