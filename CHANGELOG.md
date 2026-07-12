@@ -8,6 +8,18 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **"Solo los que faltan" button** — when a pasted playlist has some
+  tracks already in your library, a new one-click action next to
+  "Seleccionar todo" ticks exactly the missing ones so you don't have
+  to hand-uncheck the duplicates.  Shown only when relevant.
+
+### Changed
+- **Library dedup rebuild off the UI thread** — after each successful
+  download the index rebuild now runs in a background thread instead
+  of blocking Tk, eliminating the ~40 ms hiccup that was visible in
+  multi-track batches.
+
 ### Fixed
 - **404s no longer kill the download** — a SoundCloud 404 (track
   removed / DMCA / never existed on SC) used to leave the row in a
