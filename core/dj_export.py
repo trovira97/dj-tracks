@@ -27,7 +27,6 @@ side effects beyond the target file.  They live behind
 """
 from __future__ import annotations
 
-import html
 import time
 import urllib.parse
 from dataclasses import dataclass
@@ -35,7 +34,6 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from utils.logger import log
-
 
 # ── Track record — the exporter input ─────────────────────────────────────
 
@@ -203,15 +201,24 @@ def export_traktor_nml(tracks: list[TrackRecord],
                              UUID=str(int(time.time())))
     for t in valid:
         primary = ET.SubElement(playlist, "ENTRY")
-        # Traktor references the same LOCATION signature; we reuse it.
+        # Traktor matches playlist entries to collection entries by KEY.
+        # The KEY must be the FULL path in Traktor's own format:
+        # /:VOLUME/:DIR1/:DIR2/:.../:FILE — not just volume + filename.
+        # Emit the same signature the LOCATION element uses above.
         resolved = t.path.resolve()
+        parts = resolved.parts
         if resolved.drive:
-            volume = "/:" + resolved.drive.rstrip(":\\")
+            volume = resolved.drive.rstrip(":\\")
+            middle = "/:".join(parts[1:-1])
+            key = f"/:{volume}/:{middle}/:{parts[-1]}" if middle \
+                  else f"/:{volume}/:{parts[-1]}"
         else:
-            volume = ""
+            middle = "/:".join(parts[1:-1])
+            key = f"/:{middle}/:{parts[-1]}" if middle \
+                  else f"/:{parts[-1]}"
         ET.SubElement(primary, "PRIMARYKEY",
                       TYPE="TRACK",
-                      KEY=f"{volume}/:{resolved.name}")
+                      KEY=key)
 
     ET.ElementTree(root).write(
         output, encoding="utf-8", xml_declaration=True)

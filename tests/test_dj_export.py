@@ -8,10 +8,10 @@ import pytest
 
 from core.dj_export import (
     TrackRecord,
+    export_all,
     export_m3u8,
     export_rekordbox_xml,
     export_traktor_nml,
-    export_all,
 )
 
 
@@ -95,6 +95,24 @@ def test_traktor_nml_valid_structure(sample_tracks, tmp_path):
 
     key = entries[0].find("MUSICAL_KEY")
     assert key.get("VALUE") == "8A"
+
+
+def test_traktor_playlist_key_matches_full_location(sample_tracks, tmp_path):
+    """Playlist PRIMARYKEY.KEY must reference the full LOCATION path,
+    not just volume+filename — otherwise Traktor shows the tracks as
+    missing when importing the playlist."""
+    out = tmp_path / "col.nml"
+    export_traktor_nml(sample_tracks, out)
+
+    root = ET.parse(out).getroot()
+    primary_keys = [p.get("KEY") for p in root.findall(".//PRIMARYKEY")]
+    assert len(primary_keys) == 2
+    # KEY must contain the full path segments — a bare "/:C/:file.mp3"
+    # would mean Traktor can't relocate the tracks.
+    for k in primary_keys:
+        assert k.count("/:") >= 3, (
+            f"PRIMARYKEY.KEY looks truncated (no directory): {k}"
+        )
 
 
 # ── M3U8 ──────────────────────────────────────────────────────────────────

@@ -1949,8 +1949,9 @@ class HistoryPanel(ctk.CTkFrame):
         click, three DJ software libraries updated.  Only tracks whose
         file still exists on disk are included.
         """
-        from core.dj_export import export_all, records_from_history
         from tkinter import messagebox
+
+        from core.dj_export import export_all, records_from_history
 
         folder = filedialog.askdirectory(
             title="Elige la carpeta donde exportar (Rekordbox + Traktor + M3U8)",

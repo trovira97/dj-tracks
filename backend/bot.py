@@ -511,7 +511,7 @@ class DJTracksBot(discord.Client):
                     await message.add_reaction("🏅")
 
         except discord.Forbidden:
-            log.warning(f"[milestone] Forbidden — hierarchy or perms issue")
+            log.warning("[milestone] Forbidden — hierarchy or perms issue")
         except Exception as exc:
             log.warning(f"[milestone] failed: {exc}")
 

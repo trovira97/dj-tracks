@@ -32,7 +32,6 @@ from pathlib import Path
 
 from utils.logger import log
 
-
 # ── Normalisation ─────────────────────────────────────────────────────────
 
 _ACCENTS = str.maketrans({

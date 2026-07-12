@@ -125,8 +125,8 @@ class OneShot(discord.Client):
         log.info("Next step — Koya dashboard → Voz Temporal:")
         log.info(f"  Canal activador   → {TRIGGER_CHANNEL}")
         log.info(f"  Categoría         → {CATEGORY_NAME}")
-        log.info(f"  Plantilla nombre  → 🎧 Sala de {{username}}")
-        log.info(f"  Límite usuarios   → 0 (ilimitado)")
+        log.info("  Plantilla nombre  → 🎧 Sala de {username}")
+        log.info("  Límite usuarios   → 0 (ilimitado)")
 
 
 def main() -> int:

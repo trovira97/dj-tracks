@@ -195,9 +195,9 @@ class OneShot(discord.Client):
                 await role.edit(permissions=desired,
                                 reason="Least-privilege audit")
                 changes += 1
-                log.info(f"      → applied")
+                log.info("      → applied")
             except discord.Forbidden:
-                log.info(f"      ! Forbidden — hierarchy or bot perms")
+                log.info("      ! Forbidden — hierarchy or bot perms")
             except Exception as exc:
                 log.info(f"      ! failed: {exc}")
 

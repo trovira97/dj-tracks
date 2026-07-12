@@ -110,20 +110,18 @@ async def _post_digest(client: discord.Client, guild_id: int) -> None:
             "SELECT COUNT(*) FROM faq_events "
             "WHERE matched_title IS NOT NULL AND ts > ?", (week_ago,)
         ).fetchone()[0]
+        # Count ALL unmatched, not just the top-5 groups below — a long
+        # tail of one-off questions would otherwise get silently dropped
+        # from the digest's headline number.
+        unmatched_total = c.execute(
+            "SELECT COUNT(*) FROM faq_events "
+            "WHERE matched_title IS NULL AND ts > ?", (week_ago,)
+        ).fetchone()[0]
         unmatched_rows = c.execute(
             "SELECT message, COUNT(*) AS cnt FROM faq_events "
             "WHERE matched_title IS NULL AND ts > ? "
             "GROUP BY message ORDER BY cnt DESC LIMIT 5", (week_ago,)
         ).fetchall()
-
-    unmatched_total = sum(int(r[1]) for r in unmatched_rows)
-    if not unmatched_rows:
-        # There might be unmatched but not grouped; count anyway.
-        with db() as c:
-            unmatched_total = c.execute(
-                "SELECT COUNT(*) FROM faq_events "
-                "WHERE matched_title IS NULL AND ts > ?", (week_ago,)
-            ).fetchone()[0]
 
     embed = discord.Embed(
         title="📊 Resumen semanal",
@@ -234,7 +232,7 @@ async def _dm_owner(client: discord.Client, content: str) -> None:
         if owner is None:
             owner = await client.fetch_user(OWNER_DISCORD_ID)
         await owner.send(content)
-        log.info(f"[dm] owner alerted")
+        log.info("[dm] owner alerted")
     except discord.Forbidden:
         log.warning("[dm] owner has DMs closed — can't alert")
     except Exception as exc:

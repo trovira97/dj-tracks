@@ -16,7 +16,6 @@ Usage:
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import sys
@@ -79,7 +78,7 @@ class OneShot(discord.Client):
         if existing:
             log.info(f"Channel #{CHANNEL_NAME} already exists — nothing to do")
             log.info(f"Channel ID: {existing.id}")
-            log.info(f"Use it: run  /reactionrole  inside it (or click and type)")
+            log.info("Use it: run  /reactionrole  inside it (or click and type)")
             return
 
         # Pick a category.

@@ -110,8 +110,8 @@ class OneShot(discord.Client):
         log.info("")
         log.info("Next step — Koya dashboard → Honeypot → enable + point to:")
         log.info(f"    Canal trampa       : #{CHANNEL_NAME} (id={channel.id})")
-        log.info(f"    Acción             : Banear")
-        log.info(f"    Notificar          : #🛡️-mod-log")
+        log.info("    Acción             : Banear")
+        log.info("    Notificar          : #🛡️-mod-log")
 
 
 def main() -> int:
