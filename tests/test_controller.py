@@ -22,6 +22,15 @@ Focus:
   * Chromaprint not available path
   * duplicate detected → file deleted + task flagged as error
   * new track → fingerprint written to index
+- ``_process_task`` — worker orchestrator.
+  * pre-cancelled → early return, no download
+  * successful download → PROCESSING/DONE state transitions
+  * Bandcamp/SoundCloud skip post_process (yt-dlp already tagged)
+  * Other platforms run post_process when auto_fix_metadata=True
+  * dj_enrich runs on any platform when dj_enrich=True
+  * dedup_check called when dedupe_audio_fp=True
+  * record_download bumped ONLY on success + DONE
+  * cross_platform_retry called ONLY on failure with config on
 """
 from __future__ import annotations
 
@@ -256,6 +265,217 @@ def test_dedup_removes_file_on_match(bare_ctrl, tmp_path):
     # Task flagged as duplicate.
     assert task.status == DownloadStatus.ERROR
     assert "Duplicado" in task.error_msg
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# _process_task — worker orchestrator
+# ─────────────────────────────────────────────────────────────────────────
+
+def _pending_task(*, platform="spotify", output_path=None) -> DownloadTask:
+    """Build a task in PENDING state ready to be run through _process_task."""
+    task = DownloadTask(
+        track=_track(platform=platform, source_url="https://x"),
+        profile=get_profile("mp3", "320"),
+        output_dir=".",
+    )
+    task.status = DownloadStatus.PENDING
+    if output_path is not None:
+        task.output_path = output_path
+    return task
+
+
+def _run_process(ctrl, task, *, success=True, final_output=None):
+    """Common helper: patch the downloader + collaborators, run the worker.
+
+    The download side effect mirrors what AudioDownloader really does:
+    set output_path, flip status to DONE/ERROR, and return the success
+    flag (returning it explicitly is critical — a side_effect that
+    returns None *overrides* the mock's return_value with None).
+    """
+    def _download_side_effect(t):
+        if final_output is not None:
+            t.output_path = final_output
+        if success:
+            t.status   = DownloadStatus.DONE
+            t.progress = 100.0
+        else:
+            t.status = DownloadStatus.ERROR
+        return success
+
+    ctrl.downloader.download = MagicMock(side_effect=_download_side_effect)
+    ctrl._notify = MagicMock()
+    with patch.object(ctrl, "_post_process") as post, \
+         patch.object(ctrl, "_dj_enrich") as enrich, \
+         patch.object(ctrl, "_dedup_check", return_value=False) as dedup, \
+         patch.object(ctrl, "_try_cross_platform_retry") as retry, \
+         patch("utils.donor_gate.record_download") as record:
+        ctrl._process_task(task)
+    return {
+        "download":  ctrl.downloader.download,
+        "post":      post,
+        "enrich":    enrich,
+        "dedup":     dedup,
+        "retry":     retry,
+        "record":    record,
+        "notify":    ctrl._notify,
+    }
+
+
+def test_process_task_early_return_when_cancelled(bare_ctrl):
+    """Task already CANCELLED (e.g. user removed it from queue) → no work."""
+    task = _pending_task()
+    task.status = DownloadStatus.CANCELLED
+    bare_ctrl.downloader.download = MagicMock()
+    bare_ctrl._process_task(task)
+    bare_ctrl.downloader.download.assert_not_called()
+
+
+def test_process_task_success_calls_notify_and_records(tmp_path, bare_ctrl):
+    """Successful download → notify fires + record_download called once."""
+    bare_ctrl._config = {}
+    out = tmp_path / "out.mp3"
+    out.write_bytes(b"x")
+    task = _pending_task(output_path=out)
+    m = _run_process(bare_ctrl, task, success=True, final_output=out)
+    m["download"].assert_called_once_with(task)
+    m["record"].assert_called_once()
+    assert task.status == DownloadStatus.DONE
+    # Notify is called at least twice: DOWNLOADING transition + final state.
+    assert m["notify"].call_count >= 2
+
+
+def test_process_task_skips_post_process_for_bandcamp(tmp_path, bare_ctrl):
+    """Bandcamp downloads are yt-dlp-native — post_process would overwrite
+    good metadata with the thinner search-API version."""
+    bare_ctrl._config = {"auto_fix_metadata": True}
+    out = tmp_path / "out.mp3"
+    out.write_bytes(b"x")
+    task = _pending_task(platform="bandcamp", output_path=out)
+    m = _run_process(bare_ctrl, task, success=True, final_output=out)
+    m["post"].assert_not_called()
+
+
+def test_process_task_skips_post_process_for_soundcloud(tmp_path, bare_ctrl):
+    bare_ctrl._config = {"auto_fix_metadata": True}
+    out = tmp_path / "out.mp3"
+    out.write_bytes(b"x")
+    task = _pending_task(platform="soundcloud", output_path=out)
+    m = _run_process(bare_ctrl, task, success=True, final_output=out)
+    m["post"].assert_not_called()
+
+
+def test_process_task_runs_post_process_on_spotify(tmp_path, bare_ctrl):
+    """Spotify tracks lack native tags; auto_fix_metadata does the work."""
+    bare_ctrl._config = {"auto_fix_metadata": True}
+    out = tmp_path / "out.mp3"
+    out.write_bytes(b"x")
+    task = _pending_task(platform="spotify", output_path=out)
+    m = _run_process(bare_ctrl, task, success=True, final_output=out)
+    m["post"].assert_called_once()
+
+
+def test_process_task_skips_post_process_when_disabled(tmp_path, bare_ctrl):
+    bare_ctrl._config = {"auto_fix_metadata": False}
+    out = tmp_path / "out.mp3"
+    out.write_bytes(b"x")
+    task = _pending_task(platform="spotify", output_path=out)
+    m = _run_process(bare_ctrl, task, success=True, final_output=out)
+    m["post"].assert_not_called()
+
+
+def test_process_task_runs_dj_enrich_on_bandcamp_when_enabled(tmp_path, bare_ctrl):
+    """DJ enrichment (BPM/key) is orthogonal to platform — Bandcamp too."""
+    bare_ctrl._config = {"dj_enrich": True}
+    out = tmp_path / "out.mp3"
+    out.write_bytes(b"x")
+    task = _pending_task(platform="bandcamp", output_path=out)
+    m = _run_process(bare_ctrl, task, success=True, final_output=out)
+    m["enrich"].assert_called_once()
+
+
+def test_process_task_skips_dj_enrich_when_disabled(tmp_path, bare_ctrl):
+    bare_ctrl._config = {"dj_enrich": False}
+    out = tmp_path / "out.mp3"
+    out.write_bytes(b"x")
+    task = _pending_task(platform="spotify", output_path=out)
+    m = _run_process(bare_ctrl, task, success=True, final_output=out)
+    m["enrich"].assert_not_called()
+
+
+def test_process_task_dedup_check_called_when_configured(tmp_path, bare_ctrl):
+    bare_ctrl._config = {"dedupe_audio_fp": True}
+    out = tmp_path / "out.mp3"
+    out.write_bytes(b"x")
+    task = _pending_task(platform="spotify", output_path=out)
+    m = _run_process(bare_ctrl, task, success=True, final_output=out)
+    m["dedup"].assert_called_once()
+
+
+def test_process_task_no_record_download_on_failure(tmp_path, bare_ctrl):
+    """Freemium counter must NOT bump on failed downloads."""
+    bare_ctrl._config = {}
+    task = _pending_task()
+    m = _run_process(bare_ctrl, task, success=False)
+    m["record"].assert_not_called()
+
+
+def test_process_task_cross_platform_retry_on_failure(tmp_path, bare_ctrl):
+    """Failed + ERROR + config on → retry hook fires."""
+    bare_ctrl._config = {"cross_platform_retry": True}
+    task = _pending_task()
+    m = _run_process(bare_ctrl, task, success=False)
+    m["retry"].assert_called_once_with(task)
+
+
+def test_process_task_no_retry_when_config_off(tmp_path, bare_ctrl):
+    bare_ctrl._config = {"cross_platform_retry": False}
+    task = _pending_task()
+    m = _run_process(bare_ctrl, task, success=False)
+    m["retry"].assert_not_called()
+
+
+def test_process_task_no_retry_on_success(tmp_path, bare_ctrl):
+    """Successful download should never trigger the retry path."""
+    bare_ctrl._config = {"cross_platform_retry": True}
+    out = tmp_path / "out.mp3"
+    out.write_bytes(b"x")
+    task = _pending_task(output_path=out)
+    m = _run_process(bare_ctrl, task, success=True, final_output=out)
+    m["retry"].assert_not_called()
+
+
+def test_process_task_transitions_to_processing_when_post_or_enrich(tmp_path, bare_ctrl):
+    """If any post-download step runs, task briefly enters PROCESSING
+    before landing back in DONE — the UI uses this to show progress state.
+
+    Snapshots task.status at each _notify() call to prove the transition
+    actually happens; can't use _run_process helper here because it
+    replaces _notify wholesale.
+    """
+    bare_ctrl._config = {"dj_enrich": True}
+    out = tmp_path / "out.mp3"
+    out.write_bytes(b"x")
+    task = _pending_task(platform="spotify", output_path=out)
+
+    def _download_side_effect(t):
+        t.output_path = out
+        t.status      = DownloadStatus.DONE
+        t.progress    = 100.0
+        return True
+    bare_ctrl.downloader.download = MagicMock(side_effect=_download_side_effect)
+
+    seen: list = []
+    bare_ctrl._notify = MagicMock(side_effect=lambda t: seen.append(t.status))
+
+    with patch.object(bare_ctrl, "_post_process"), \
+         patch.object(bare_ctrl, "_dj_enrich"), \
+         patch.object(bare_ctrl, "_dedup_check", return_value=False), \
+         patch.object(bare_ctrl, "_try_cross_platform_retry"), \
+         patch("utils.donor_gate.record_download"):
+        bare_ctrl._process_task(task)
+
+    assert DownloadStatus.PROCESSING in seen
+    assert task.status == DownloadStatus.DONE
 
 
 def test_dedup_writes_fingerprint_when_new_track(bare_ctrl, tmp_path):
