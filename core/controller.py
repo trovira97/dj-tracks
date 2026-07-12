@@ -625,93 +625,14 @@ class AppController:
         log.info(f"[Controller] Hilos de descarga: {n}")
 
     def update_ytdlp(self) -> dict[str, str]:
+        """Check PyPI for a newer yt-dlp release; install it if there is one.
+
+        Thin wrapper around :func:`utils.ytdlp_updater.update_ytdlp` — the
+        implementation lives there because it doesn't touch controller state
+        and is easier to test in isolation.
         """
-        Check PyPI for a newer yt-dlp release; install it if there is one.
-
-        YouTube changes its protections every few months and yt-dlp ships
-        fixes very fast — keeping it fresh fixes most "HTTP 403" / "video
-        unavailable" download failures.
-
-        Returns:
-            A dict with keys ``status`` (``up-to-date`` | ``updated`` |
-            ``error``), ``current`` (installed version), ``latest``
-            (PyPI version when known), and ``message`` (human-friendly).
-        """
-        import subprocess
-        import sys
-
-        # Current version.
-        try:
-            import yt_dlp
-            current = yt_dlp.version.__version__
-        except Exception as exc:
-            return {"status": "error", "current": "?", "latest": "?",
-                    "message": f"yt-dlp no se pudo cargar: {exc}"}
-
-        # Latest version on PyPI.
-        latest = "?"
-        try:
-            import requests
-            r = requests.get("https://pypi.org/pypi/yt-dlp/json", timeout=8)
-            r.raise_for_status()
-            latest = r.json().get("info", {}).get("version", "?")
-        except Exception as exc:
-            log.warning(f"[Controller] PyPI no accesible: {exc}")
-            return {"status": "error", "current": current, "latest": "?",
-                    "message": f"No se pudo consultar PyPI: {exc}"}
-
-        # Normalise version strings before comparing.  PyPI reports
-        # ``2026.6.9`` while yt-dlp's __version__ is ``2026.06.09`` — same
-        # release, different formatting.  Strip leading zeroes from every
-        # numeric component so the comparison is on the actual numbers.
-        def _norm(v: str) -> tuple:
-            parts = []
-            for p in v.replace("-", ".").split("."):
-                try:
-                    parts.append(int(p))
-                except ValueError:
-                    parts.append(p)
-            return tuple(parts)
-
-        if _norm(current) == _norm(latest):
-            return {"status": "up-to-date", "current": current,
-                    "latest": latest,
-                    "message": f"yt-dlp ya está actualizado (v{current})"}
-
-        # Run the upgrade in a SEPARATE Python process and detach.  Replacing
-        # yt-dlp while it's still imported in this process can corrupt the
-        # interpreter on Windows (locked .pyd files), so we hand pip off and
-        # let it finish on its own.  The user is told to restart the app.
-        import os as _os
-        try:
-            # CREATE_NEW_PROCESS_GROUP + DETACHED_PROCESS so the child outlives
-            # us cleanly even if the user kills DJ Tracks before pip finishes.
-            kwargs: dict = {}
-            if _os.name == "nt":
-                kwargs["creationflags"] = (
-                    subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
-                    | 0x00000008                         # DETACHED_PROCESS
-                )
-            else:
-                kwargs["start_new_session"] = True
-
-            subprocess.Popen(
-                [sys.executable, "-m", "pip", "install", "--upgrade",
-                 "--quiet", "--disable-pip-version-check", "yt-dlp"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                **kwargs,
-            )
-        except Exception as exc:
-            return {"status": "error", "current": current, "latest": latest,
-                    "message": f"No se pudo lanzar el instalador: {exc}"}
-
-        log.info(f"[Controller] yt-dlp upgrade lanzado en segundo plano: "
-                 f"{current} → {latest}")
-        return {"status": "updated", "current": current, "latest": latest,
-                "message": f"Actualizando yt-dlp en segundo plano "
-                           f"(v{current} → v{latest}).\n\n"
-                           f"Cierra y vuelve a abrir DJ Tracks dentro de "
-                           f"30 segundos para usar la nueva versión."}
+        from utils.ytdlp_updater import update_ytdlp as _do
+        return _do()
 
     def reset_config(self) -> None:
         """Reset configuration to defaults.  Credentials and queue are kept."""
