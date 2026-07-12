@@ -1275,6 +1275,15 @@ class SearchPanel(ctk.CTkFrame):
             command=self._toggle_select_all)
         # Do NOT pack here — shown only when results exist.
 
+        # "Solo los que faltan" — shown when at least one result is already
+        # in the local library (typical case: pasted a playlist URL).
+        self._sel_missing_btn = ctk.CTkButton(
+            _status_row, text="⇢ Solo los que faltan",
+            width=140, height=22, font=_font(9, "bold"),
+            fg_color="transparent", hover_color=C["surface"],
+            text_color=C["accent"], border_color=C["accent"], border_width=1,
+            corner_radius=5, command=self._select_missing_only)
+
         self._results_frame = ctk.CTkScrollableFrame(
             self, fg_color="transparent",
             scrollbar_button_color=C["border"],
@@ -1488,6 +1497,7 @@ class SearchPanel(ctk.CTkFrame):
         # Only meaningful when there's a batch (>3 results).
         # The index is populated at app startup by the main App class.
         lib_txt = ""
+        self._missing_track_ids: set[int] = set()  # for the "solo faltan" btn
         if len(results) > 3:
             try:
                 from core.library_index import get_library_index
@@ -1497,6 +1507,9 @@ class SearchPanel(ctk.CTkFrame):
                     already = len(results) - len(missing)
                     if already:
                         lib_txt = f"  ·  ✓ {already} ya lo tienes"
+                        # Track identity by id() for the "solo faltan" btn —
+                        # widgets keep a reference to the same TrackInfo.
+                        self._missing_track_ids = {id(t) for t in missing}
             except Exception:
                 pass
 
@@ -1509,6 +1522,15 @@ class SearchPanel(ctk.CTkFrame):
         # Show "Select all" checkbox now that we have results.
         self._sel_all_var.set(False)
         self._sel_all_chk.pack(side="right", padx=(0, 2))
+        # Show "Solo los que faltan" only when dedup is meaningful
+        # (there's at least one library-hit AND at least one missing).
+        n_missing = len(self._missing_track_ids)
+        if 0 < n_missing < len(results):
+            self._sel_missing_btn.configure(
+                text=f"⇢ Solo los que faltan ({n_missing})")
+            self._sel_missing_btn.pack(side="right", padx=(0, 8))
+        else:
+            self._sel_missing_btn.pack_forget()
 
         BATCH     = 20
         grid_mode = self._view_var.get() == "Cuadrícula"
@@ -1573,6 +1595,32 @@ class SearchPanel(ctk.CTkFrame):
         else:
             self._sel_bar.pack_forget()
 
+    def _select_missing_only(self) -> None:
+        """Tick every result whose track isn't in the local library yet.
+
+        Powers the "Solo los que faltan" button in the playlist import
+        flow — one click to skip the tracks you already have and queue
+        only the new ones.
+        """
+        missing_ids = getattr(self, "_missing_track_ids", set())
+        if not missing_ids:
+            return
+        for w in self._results:
+            track = getattr(w, "_track", None)
+            if track is None or not hasattr(w, "_sel_var"):
+                continue
+            w._sel_var.set(id(track) in missing_ids)
+        # Refresh the bottom bar count.
+        n = sum(1 for w in self._results if getattr(w, "selected", False))
+        if n:
+            self._sel_btn.configure(
+                text=f"⬇  Descargar seleccionados ({n})",
+                fg_color=C["accent"], text_color="#000", state="normal")
+            self._sel_bar.pack(fill="x", padx=20, pady=(0, 14))
+        else:
+            self._sel_bar.pack_forget()
+        self._refresh_select_all_state()
+
     def _refresh_select_all_state(self) -> None:
         """Sync the select-all checkbox to the current per-item selection state.
 
@@ -1620,6 +1668,8 @@ class SearchPanel(ctk.CTkFrame):
             self._sel_bar.pack_forget()
         if hasattr(self, "_sel_all_chk"):
             self._sel_all_chk.pack_forget()
+        if hasattr(self, "_sel_missing_btn"):
+            self._sel_missing_btn.pack_forget()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1700,14 +1750,20 @@ class DownloadPanel(ctk.CTkFrame):
 
         if task.status in (DownloadStatus.DONE, DownloadStatus.ERROR):
             self._history.add_from_task(task)
-            # Refresh the library dedup index so the next URL resolution
-            # picks up the fresh download.  Skipped on failed downloads.
+            # Refresh the library dedup index off the Tk thread — with a
+            # large history (thousands of records) the rebuild walks the
+            # entire list, and doing it on the callback thread caused
+            # visible UI hiccups after each download in a big batch.
             if task.status == DownloadStatus.DONE:
-                try:
-                    from core.library_index import get_library_index
-                    get_library_index().rebuild(history_manager=self._history)
-                except Exception:
-                    pass
+                def _rebuild_bg():
+                    try:
+                        from core.library_index import get_library_index
+                        get_library_index().rebuild(
+                            history_manager=self._history)
+                    except Exception:
+                        pass
+                threading.Thread(target=_rebuild_bg, daemon=True,
+                                 name="lib-index-rebuild").start()
 
         # Fire the completion callback exactly once per task.
         if task.status == DownloadStatus.DONE and task.task_id not in self._completed_ids:
