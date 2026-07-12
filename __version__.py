@@ -6,7 +6,7 @@ Central version constant for DJ Tracks.
 Imported everywhere a version string is shown (sidebar, About dialog,
 file headers, etc.) so a single edit propagates app-wide.
 """
-__version__      = "2.3.1"
+__version__      = "2.3.2"
 __app_name__     = "DJ Tracks"
 __app_subtitle__ = "Music Downloader"
 __author__       = "Thibaud Rovira"

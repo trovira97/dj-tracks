@@ -8,6 +8,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.3.2] — 2026-07-12
+
 ### Added
 - **"Solo los que faltan" button** — when a pasted playlist has some
   tracks already in your library, a new one-click action next to
@@ -19,6 +21,15 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   download the index rebuild now runs in a background thread instead
   of blocking Tk, eliminating the ~40 ms hiccup that was visible in
   multi-track batches.
+- **Repo housekeeping** — reorganized Discord server-maintenance
+  scripts under `scripts/discord/`, removed a stale VBS launcher
+  with a hardcoded runtime path, removed the deprecated
+  `providers/base_provider.py` re-export module, dead-code sweep
+  (5 unused public functions, ~40 LOC), shared `BROWSER_USER_AGENT`
+  constant across the HTTP providers.
+- **Controller slim-down** — extracted `AppController.update_ytdlp`
+  (89 lines) into `utils/ytdlp_updater.py`; controller shrank from
+  730 to 651 lines (-11%).
 
 ### Fixed
 - **404s no longer kill the download** — a SoundCloud 404 (track
@@ -32,6 +43,17 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   `Expecting value: line 1 column 1 (char 0)` errors on every search.
   Now detects the HTML content-type upfront, disables Bandcamp for
   the session with a single warning, and returns clean empty results.
+
+### Tests
+- Went from 130 → 294 tests (+126 %).  New coverage for
+  `app_updater` (semver + asset picking), `search_manager` (dedup +
+  URL routing), `donor_gate` (full freemium logic including offline
+  grace), `ytdlp_updater` (version normalisation + status paths),
+  `audio_downloader` (7 error classifiers, `_humanise_error`,
+  `_build_yt_query`, `DownloadTask`), `controller`
+  (`_process_task`, `_try_cross_platform_retry`, `_dedup_check`,
+  `_post_process`, `_dj_enrich`).  The O.B.I. 404 bug that started
+  the retry-classifier fix now has 10 regression tests around it.
 
 ## [2.3.1] — 2026-07-12
 
