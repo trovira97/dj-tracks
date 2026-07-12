@@ -732,19 +732,33 @@ class AudioDownloader:
                 or "premium" in low or "subscriber" in low)
 
     @staticmethod
+    def is_not_found_error(raw: str) -> bool:
+        """True on a 404 / "not found" from the source platform."""
+        if not raw:
+            return False
+        low = raw.lower()
+        return "404" in low or "not found" in low
+
+    @staticmethod
     def is_irrecoverable_error(raw: str) -> bool:
         """True if no amount of retrying THIS source will help.  These
         are the cases that should fall back to the cross-platform retry.
 
-        Plain 403 / 404 / network errors are deliberately NOT in here:
-        they may succeed on a fresh attempt with the same source, or are
-        bugs in our own request (stale yt-dlp, cookies expired, etc.).
+        Includes 404 — a track that's been removed from SoundCloud (DMCA,
+        deletion, or a stale search-derived URL) will never resolve on
+        that platform, so we should always try to find it elsewhere.
+
+        Plain 403 / network errors are still NOT in here: those often
+        succeed on a fresh attempt with the same source (rate limit,
+        transient network) or are bugs in our request (stale yt-dlp,
+        expired cookies) that fixing the source, not switching, resolves.
         """
         return (AudioDownloader.is_drm_error(raw)
                 or AudioDownloader.is_geo_error(raw)
                 or AudioDownloader.is_age_error(raw)
                 or AudioDownloader.is_private_error(raw)
-                or AudioDownloader.is_premium_error(raw))
+                or AudioDownloader.is_premium_error(raw)
+                or AudioDownloader.is_not_found_error(raw))
 
     @staticmethod
     def _humanise_error(raw: str) -> str:

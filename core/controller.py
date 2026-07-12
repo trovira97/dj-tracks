@@ -371,7 +371,7 @@ class AppController:
         raw = (getattr(failed_task, "error_raw", "")
                or failed_task.error_msg or "")
         if not AudioDownloader.is_irrecoverable_error(raw):
-            return   # 403/404/network errors may succeed on plain retry
+            return   # 403/network errors may succeed on a plain retry
 
         track       = failed_task.track
         orig_plat   = track.platform
