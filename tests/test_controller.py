@@ -31,6 +31,15 @@ Focus:
   * dedup_check called when dedupe_audio_fp=True
   * record_download bumped ONLY on success + DONE
   * cross_platform_retry called ONLY on failure with config on
+- ``_post_process`` — cover art + metadata rewrite.
+  * skips cover download when track.cover_url is empty
+  * always calls write_metadata + verify_and_fix
+  * exceptions swallowed (logged, not raised)
+- ``_dj_enrich`` — Beatport BPM/key/Camelot enrichment.
+  * builds the entry dict correctly from the task
+  * passes config values through to dj_metadata.enrich_files
+  * follows file renames (DJ-filename option)
+  * exceptions swallowed
 """
 from __future__ import annotations
 
@@ -498,3 +507,202 @@ def test_dedup_writes_fingerprint_when_new_track(bare_ctrl, tmp_path):
     assert idx["brand_new.mp3"] == "ZZZZZZZZZZ"
     # File still there.
     assert task.output_path.exists()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# _post_process — cover art + metadata rewrite
+# ─────────────────────────────────────────────────────────────────────────
+
+def _post_task(*, cover_url="", output_path=None):
+    """Task ready for _post_process — path + track with optional cover."""
+    track = TrackInfo(
+        title="Song", artists=["Artist"], platform="spotify",
+        cover_url=cover_url,
+    )
+    task = DownloadTask(track=track, profile=get_profile("mp3", "320"),
+                        output_dir=".")
+    task.output_path = output_path
+    return task
+
+
+def test_post_process_downloads_cover_when_url_present(tmp_path, bare_ctrl):
+    out = tmp_path / "song.mp3"
+    out.write_bytes(b"x")
+    task = _post_task(cover_url="https://cover.example/x.jpg", output_path=out)
+    with patch("core.controller.download_cover",
+               return_value=b"fake-jpeg-bytes") as cover, \
+         patch("core.controller.write_metadata") as wm, \
+         patch("core.controller.verify_and_fix", return_value=[]):
+        bare_ctrl._post_process(task)
+    cover.assert_called_once_with("https://cover.example/x.jpg")
+    # write_metadata got the fetched cover bytes.
+    wm.assert_called_once()
+    assert wm.call_args[0][2] == b"fake-jpeg-bytes"
+
+
+def test_post_process_skips_cover_when_no_url(tmp_path, bare_ctrl):
+    """Empty cover_url → don't hit the network at all."""
+    out = tmp_path / "song.mp3"
+    out.write_bytes(b"x")
+    task = _post_task(cover_url="", output_path=out)
+    with patch("core.controller.download_cover") as cover, \
+         patch("core.controller.write_metadata") as wm, \
+         patch("core.controller.verify_and_fix", return_value=[]):
+        bare_ctrl._post_process(task)
+    cover.assert_not_called()
+    # write_metadata still called, but with cover=None.
+    wm.assert_called_once()
+    assert wm.call_args[0][2] is None
+
+
+def test_post_process_runs_verify_and_fix(tmp_path, bare_ctrl):
+    """verify_and_fix runs after metadata write; corrections logged."""
+    out = tmp_path / "song.mp3"
+    out.write_bytes(b"x")
+    task = _post_task(output_path=out)
+    with patch("core.controller.download_cover"), \
+         patch("core.controller.write_metadata"), \
+         patch("core.controller.verify_and_fix",
+               return_value=["artist", "title"]) as vf:
+        bare_ctrl._post_process(task)
+    vf.assert_called_once()
+
+
+def test_post_process_swallows_write_metadata_error(tmp_path, bare_ctrl):
+    """Any exception in the chain must be logged, not propagated —
+    a botched tag write shouldn't abort the whole task."""
+    out = tmp_path / "song.mp3"
+    out.write_bytes(b"x")
+    task = _post_task(output_path=out)
+    with patch("core.controller.download_cover"), \
+         patch("core.controller.write_metadata",
+               side_effect=OSError("mutagen exploded")), \
+         patch("core.controller.verify_and_fix"):
+        bare_ctrl._post_process(task)   # must not raise
+
+
+def test_post_process_swallows_cover_download_error(tmp_path, bare_ctrl):
+    out = tmp_path / "song.mp3"
+    out.write_bytes(b"x")
+    task = _post_task(cover_url="https://cover.example/x.jpg", output_path=out)
+    with patch("core.controller.download_cover",
+               side_effect=Exception("network down")), \
+         patch("core.controller.write_metadata"), \
+         patch("core.controller.verify_and_fix"):
+        bare_ctrl._post_process(task)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# _dj_enrich — Beatport BPM/key/Camelot pipeline
+# ─────────────────────────────────────────────────────────────────────────
+
+def _enrich_task(*, output_path=None, genre="House", cover_url="",
+                 year="", track_number=0, total_tracks=0):
+    track = TrackInfo(
+        title="Track", artists=["Artist"], platform="spotify",
+        genre=genre, cover_url=cover_url, year=year,
+        track_number=track_number, total_tracks=total_tracks,
+    )
+    task = DownloadTask(track=track, profile=get_profile("mp3", "320"),
+                        output_dir=".")
+    task.output_path = output_path
+    return task
+
+
+def test_dj_enrich_calls_enrich_files_with_correct_entry(tmp_path, bare_ctrl):
+    """The entry dict passed to enrich_files must contain all the fields
+    dj_metadata expects — path, artist, title, genre, cover_url, year,
+    track_number, tracks_count."""
+    out = tmp_path / "track.mp3"
+    task = _enrich_task(
+        output_path=out, genre="Techno", cover_url="https://cover",
+        year="2024", track_number=2, total_tracks=10,
+    )
+    with patch("metadata.dj_metadata.enrich_files",
+               return_value={"tagged": 1, "renames": {}}) as enrich:
+        bare_ctrl._dj_enrich(task)
+
+    enrich.assert_called_once()
+    entries, fmt = enrich.call_args[0][0], enrich.call_args[0][1]
+    assert len(entries) == 1
+    e = entries[0]
+    assert e["path"]         == str(out)
+    assert e["artist"]       == "Artist"
+    assert e["title"]        == "Track"
+    assert e["genre"]        == "Techno"
+    assert e["cover_url"]    == "https://cover"
+    assert e["year"]         == "2024"
+    assert e["track_number"] == 2
+    assert e["tracks_count"] == 10
+    assert fmt == "mp3"
+
+
+def test_dj_enrich_forwards_config_flags(tmp_path, bare_ctrl):
+    """Config toggles must reach dj_metadata: api_key, local fallback,
+    replaygain, quality check, dj_filename — otherwise features silently
+    do nothing."""
+    bare_ctrl._config = {
+        "dj_getsongbpm_key":  "APIKEY123",
+        "dj_local_fallback":  True,
+        "preferred_quality":  "flac",
+        "dj_quality_check":   True,
+        "dj_filename":        True,
+        "dj_replaygain":      True,
+    }
+    out = tmp_path / "track.mp3"
+    task = _enrich_task(output_path=out)
+    with patch("metadata.dj_metadata.enrich_files",
+               return_value={"tagged": 1, "renames": {}}) as enrich:
+        bare_ctrl._dj_enrich(task)
+
+    kwargs = enrich.call_args[1]
+    assert kwargs["api_key"]            == "APIKEY123"
+    assert kwargs["use_local_fallback"] is True
+    assert kwargs["requested_quality"]  == "flac"
+    assert kwargs["check_quality"]      is True
+    assert kwargs["dj_filename"]        is True
+    assert kwargs["replaygain"]         is True
+    # cover already embedded by _post_process — this call should skip it.
+    assert kwargs["embed_covers"]       is False
+
+
+def test_dj_enrich_follows_rename_of_output_path(tmp_path, bare_ctrl):
+    """When the dj_filename option renames the file to
+    'Track [BPM - Camelot].mp3', task.output_path must follow."""
+    orig = tmp_path / "old_name.mp3"
+    new  = tmp_path / "Track [128 - 8A].mp3"
+    task = _enrich_task(output_path=orig)
+    with patch("metadata.dj_metadata.enrich_files",
+               return_value={"tagged": 1, "renames": {str(orig): str(new)}}):
+        bare_ctrl._dj_enrich(task)
+    assert task.output_path == new
+
+
+def test_dj_enrich_leaves_path_when_no_rename(tmp_path, bare_ctrl):
+    orig = tmp_path / "track.mp3"
+    task = _enrich_task(output_path=orig)
+    with patch("metadata.dj_metadata.enrich_files",
+               return_value={"tagged": 1, "renames": {}}):
+        bare_ctrl._dj_enrich(task)
+    assert task.output_path == orig
+
+
+def test_dj_enrich_swallows_enrich_files_error(tmp_path, bare_ctrl):
+    """Failures in Beatport scraping / GetSongBPM / librosa must be
+    logged, never propagated — DJ metadata is optional value-add."""
+    task = _enrich_task(output_path=tmp_path / "x.mp3")
+    with patch("metadata.dj_metadata.enrich_files",
+               side_effect=RuntimeError("beatport 500")):
+        bare_ctrl._dj_enrich(task)   # must not raise
+
+
+def test_dj_enrich_uses_downloader_ffmpeg_path(tmp_path, bare_ctrl):
+    """When the downloader has _ffmpeg_path set (bundled ffmpeg location),
+    _dj_enrich must pass THAT path — not fall back to system 'ffmpeg' —
+    so DJ enrichment works in the frozen .exe too."""
+    bare_ctrl.downloader._ffmpeg_path = "/opt/custom/ffmpeg"
+    task = _enrich_task(output_path=tmp_path / "x.mp3")
+    with patch("metadata.dj_metadata.enrich_files",
+               return_value={"tagged": 1, "renames": {}}) as enrich:
+        bare_ctrl._dj_enrich(task)
+    assert enrich.call_args[1]["ffmpeg"] == "/opt/custom/ffmpeg"
