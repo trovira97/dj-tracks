@@ -8,6 +8,23 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.3.1] — 2026-07-12
+
+### Fixed
+- **Traktor NML playlist** — `PRIMARYKEY.KEY` was truncated to
+  `/:VOLUME/:FILE`, causing every track in the exported playlist to
+  appear as *missing* on import.  Now emits the full
+  `/:VOL/:DIR/:.../:FILE` signature that matches the `LOCATION`
+  element in the collection, so Traktor resolves the tracks correctly.
+- **Weekly digest** (backend) — the "sin match" headline undercounted
+  when more than 5 distinct unmatched questions existed in a week
+  (only the top-5 grouped rows were summed).  The count now reflects
+  the full long tail.
+
+### Chore
+- CI green again — ran `ruff --fix` across the new modules introduced
+  in 2.3.0 (17 style findings auto-resolved).
+
 ## [2.3.0] — 2026-07-06
 
 ### Added
