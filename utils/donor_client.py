@@ -96,32 +96,6 @@ def _backend_url() -> str:
     return DEFAULT_BACKEND
 
 
-def check_donor(discord_user_id: str, timeout: float = 5.0) -> bool | None:
-    """Ask the backend whether *discord_user_id* has the Donor role.
-
-    Returns True / False on a clean response, None on any error.  The
-    caller should treat None as "don't change cached state".
-    """
-    if not discord_user_id:
-        return None
-    try:
-        import requests
-        r = requests.get(
-            f"{_backend_url()}/verify",
-            params={"discord_id": discord_user_id},
-            timeout=timeout,
-            headers={"User-Agent": "dj-tracks-app"},
-        )
-        if r.status_code != 200:
-            log.info(f"[Donor] backend HTTP {r.status_code}")
-            return None
-        data = r.json() or {}
-        return bool(data.get("donor", False))
-    except Exception as exc:
-        log.info(f"[Donor] verify failed: {exc}")
-        return None
-
-
 def open_oauth_flow(local_token: str) -> bool:
     """Open the system browser pointing at the backend's OAuth start.
 

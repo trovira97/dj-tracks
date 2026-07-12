@@ -239,9 +239,3 @@ class SpotifyProvider(MusicProvider):
             log.error(f"[Spotify] Error al procesar URL: {exc}")
         return []
 
-    def update_credentials(self, client_id: str, client_secret: str) -> None:
-        self._client_id     = client_id
-        self._client_secret = client_secret
-        self._available     = False
-        self._sp            = None
-        self._init()

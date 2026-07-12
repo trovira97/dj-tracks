@@ -12,6 +12,14 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
+# Shared User-Agent for HTTP scraping providers.  Kept in one place so
+# updating the Chrome/build major (yearly-ish) is a single-line change
+# instead of a repo-wide grep.  yt-dlp handles its own UA rotation.
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
+)
+
 
 @dataclass
 class TrackInfo:

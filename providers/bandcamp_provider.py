@@ -41,16 +41,14 @@ class BandcampProvider(MusicProvider):
     _ALBUM_RE = re.compile(r"bandcamp\.com/album/", re.I)
 
     def __init__(self) -> None:
+        from providers import BROWSER_USER_AGENT
         self._session = requests.Session()
         self._session.headers.update({
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
-            ),
-            "Accept": "application/json",
+            "User-Agent":   BROWSER_USER_AGENT,
+            "Accept":       "application/json",
             "Content-Type": "application/json",
-            "Origin": "https://bandcamp.com",
-            "Referer": "https://bandcamp.com/",
+            "Origin":       "https://bandcamp.com",
+            "Referer":      "https://bandcamp.com/",
         })
         self._available = True
         log.info("[Bandcamp] Cliente iniciado (API pública)")

@@ -181,11 +181,6 @@ class SearchManager:
         """Return the provider registered for *platform*, or ``None``."""
         return self._providers.get(platform)
 
-    @property
-    def available_platforms(self) -> list[str]:
-        """List of platform value strings for registered providers."""
-        return [p.value for p in self._providers]
-
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     @staticmethod

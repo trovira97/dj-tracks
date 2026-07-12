@@ -34,12 +34,10 @@ class SoundCloudProvider(MusicProvider):
     CLIENT_RE = re.compile(r'client_id:"([^"]+)"')
 
     def __init__(self, client_id: str = "") -> None:
+        from providers import BROWSER_USER_AGENT
         self._client_id = client_id if self._valid_id(client_id) else ""
         self._session   = requests.Session()
-        self._session.headers["User-Agent"] = (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
-        )
+        self._session.headers["User-Agent"] = BROWSER_USER_AGENT
         self._available = True
         log.info(
             "[SoundCloud] Cliente inicializado con client_id configurado"

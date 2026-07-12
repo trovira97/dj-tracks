@@ -205,12 +205,3 @@ def set_donor(is_donor: bool, *,
         _STATE._save()
     if is_donor and _STATE.discord_user_id:
         _sync_with_server("link")
-
-
-def reset_counter() -> None:
-    """Local-only reset.  Server keeps its counter (anti-bypass).
-    Useful only after a confirmed upgrade to donor."""
-    with _State._LOCK:
-        _STATE.download_count = 0
-        _STATE.offline_count  = 0
-        _STATE._save()

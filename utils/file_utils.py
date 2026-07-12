@@ -5,7 +5,6 @@ File-system helpers: path construction, collision avoidance, and formatting.
 """
 from __future__ import annotations
 
-import shutil
 import uuid
 from pathlib import Path
 
@@ -50,18 +49,6 @@ def build_output_path(
     path     = Path(base_folder) / f"{relative}.{ext}"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
-
-
-def move_file(src: Path, dst: Path) -> Path:
-    """
-    Move *src* to *dst*, creating any missing parent directories.
-
-    Returns:
-        The destination :class:`~pathlib.Path`.
-    """
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(src), str(dst))
-    return dst
 
 
 def get_unique_path(path: Path) -> Path:
