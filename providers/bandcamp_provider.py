@@ -117,9 +117,24 @@ class BandcampProvider(MusicProvider):
         try:
             resp = self._session.post(self.SEARCH_URL, json=payload, timeout=12)
             resp.raise_for_status()
+            # Bandcamp added bot protection in mid-2026: the public search
+            # endpoint now returns an HTML challenge page instead of JSON
+            # when hit from a non-browser client.  Detect that upfront and
+            # bail cleanly — no results, no error spam in the logs.
+            ctype = resp.headers.get("content-type", "")
+            if "application/json" not in ctype:
+                if self._available:
+                    log.warning(
+                        "[Bandcamp] endpoint devolvió HTML (probable bot-"
+                        "protection Cloudflare) — desactivo Bandcamp para "
+                        "esta sesión hasta que arreglemos el bypass"
+                    )
+                self._available = False
+                return []
             data = resp.json() or {}
         except Exception as exc:
-            log.error(f"[Bandcamp] Error en búsqueda: {exc}")
+            log.warning(f"[Bandcamp] búsqueda no disponible: {exc}")
+            self._available = False
             return []
 
         # Response shape: {"auto": {"results": [...]}}
@@ -138,14 +153,20 @@ class BandcampProvider(MusicProvider):
     def search_albums(self, query: str, limit: int = 10) -> list[TrackInfo]:
         """Search Bandcamp albums (search_filter='a').  The album URL resolves
         to all its tracks via :meth:`get_tracks_from_url`."""
+        if not self._available:
+            return []
         payload = {"search_text": query, "search_filter": "a",
                    "full_page": True, "fan_id": None}
         try:
             resp = self._session.post(self.SEARCH_URL, json=payload, timeout=12)
             resp.raise_for_status()
+            if "application/json" not in resp.headers.get("content-type", ""):
+                self._available = False
+                return []
             data = resp.json() or {}
         except Exception as exc:
-            log.error(f"[Bandcamp] Error en búsqueda de álbumes: {exc}")
+            log.warning(f"[Bandcamp] álbumes no disponible: {exc}")
+            self._available = False
             return []
         results = (data.get("auto") or {}).get("results") or []
         out: list[TrackInfo] = []

@@ -8,6 +8,17 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.3.3] — 2026-07-12
+
+### Fixed
+- **Bandcamp bot-protection** — Bandcamp's public search API started
+  returning HTML challenge pages (Cloudflare) in mid-2026, which the
+  provider was blindly trying to parse as JSON, spamming
+  `Expecting value: line 1 column 1 (char 0)` errors into the logs on
+  every search.  Now detects the HTML content-type upfront, disables
+  Bandcamp for the session with a single warning, and returns clean
+  empty results.  Other providers keep working normally.
+
 ## [2.3.2] — 2026-07-12
 
 ### Fixed

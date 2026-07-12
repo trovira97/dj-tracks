@@ -16,10 +16,12 @@ def provider():
     return BandcampProvider()
 
 
-def _mock_response(json_data: dict):
+def _mock_response(json_data: dict, content_type: str = "application/json"):
     resp = MagicMock()
     resp.json.return_value = json_data
     resp.raise_for_status = MagicMock()
+    # Provider now guards on content-type to detect Cloudflare HTML challenges.
+    resp.headers = {"content-type": content_type}
     return resp
 
 
@@ -118,6 +120,16 @@ class TestSearch:
     def test_malformed_response_returns_empty(self, provider):
         with patch.object(provider._session, "post", return_value=_mock_response({})):
             assert provider.search("x") == []
+
+    def test_html_challenge_marks_unavailable(self, provider):
+        """Bandcamp's public API started returning HTML challenge pages
+        in 2026 — we detect the content-type and disable the provider
+        for the session instead of crashing on ``.json()`` parsing."""
+        assert provider.available   # starts available
+        html_resp = _mock_response({}, content_type="text/html; charset=utf-8")
+        with patch.object(provider._session, "post", return_value=html_resp):
+            assert provider.search("anything") == []
+        assert not provider.available   # flipped to unavailable
 
 
 # ─────────────────────────────────────────────────────────────────────────────
