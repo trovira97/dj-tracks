@@ -706,3 +706,291 @@ def test_dj_enrich_uses_downloader_ffmpeg_path(tmp_path, bare_ctrl):
                return_value={"tagged": 1, "renames": {}}) as enrich:
         bare_ctrl._dj_enrich(task)
     assert enrich.call_args[1]["ffmpeg"] == "/opt/custom/ffmpeg"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# add_to_queue — freemium gate + folder structure + executor submit
+# ─────────────────────────────────────────────────────────────────────────
+
+from concurrent.futures import ThreadPoolExecutor  # noqa: E402
+from core.controller import DonorGateBlocked  # noqa: E402
+
+
+@pytest.fixture
+def queue_ctrl(tmp_path):
+    """AppController just wired-up enough for queue-management tests.
+
+    We DO instantiate the ThreadPoolExecutor here so submit() doesn't
+    explode, but the process function is patched at each test so no
+    real download work happens.
+    """
+    c = AppController.__new__(AppController)
+    c._config     = {"download_folder": str(tmp_path / "downloads")}
+    c._queue      = []
+    c._queue_lock = threading.Lock()
+    c._dedup_lock = threading.Lock()
+    c.search_manager = MagicMock()
+    c.downloader    = MagicMock()
+    c._on_task_update = None
+    # Real executor so submit() runs (we'll patch _process_task).
+    c._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="test-dl")
+    yield c
+    c._executor.shutdown(wait=True)
+
+
+def _sample_track(**kw):
+    """A minimal TrackInfo good enough for add_to_queue."""
+    kw.setdefault("title", "Song")
+    kw.setdefault("artists", ["Artist"])
+    kw.setdefault("platform", "spotify")
+    kw.setdefault("source_url", "https://x/y")
+    return TrackInfo(**kw)
+
+
+def test_add_to_queue_raises_when_freemium_limit_hit(queue_ctrl):
+    """When can_download() returns False, add_to_queue must raise
+    DonorGateBlocked so the UI can show the lockout dialog."""
+    with patch("utils.donor_gate.can_download", return_value=False), \
+         patch.object(queue_ctrl, "_process_task"):
+        with pytest.raises(DonorGateBlocked):
+            queue_ctrl.add_to_queue(_sample_track())
+    # Queue must NOT contain the task on a blocked call.
+    assert queue_ctrl._queue == []
+
+
+def test_add_to_queue_appends_task_and_submits(queue_ctrl):
+    """Normal path: task ends up in _queue AND gets submitted to executor."""
+    with patch("utils.donor_gate.can_download", return_value=True), \
+         patch.object(queue_ctrl, "_process_task") as pt, \
+         patch.object(queue_ctrl, "_notify"):
+        task = queue_ctrl.add_to_queue(_sample_track())
+    assert task in queue_ctrl._queue
+    # _process_task runs on the executor — wait for it.
+    queue_ctrl._executor.shutdown(wait=True)
+    pt.assert_called_once_with(task)
+
+
+def test_add_to_queue_notifies_immediately(queue_ctrl):
+    """UI should get an immediate PENDING notification before the download
+    thread even starts."""
+    with patch("utils.donor_gate.can_download", return_value=True), \
+         patch.object(queue_ctrl, "_process_task"), \
+         patch.object(queue_ctrl, "_notify") as notify:
+        queue_ctrl.add_to_queue(_sample_track())
+    notify.assert_called_once()
+
+
+def test_add_to_queue_uses_config_format_and_quality(queue_ctrl, tmp_path):
+    queue_ctrl._config.update({
+        "preferred_format":  "flac",
+        "preferred_quality": "best",
+    })
+    with patch("utils.donor_gate.can_download", return_value=True), \
+         patch.object(queue_ctrl, "_process_task"), \
+         patch.object(queue_ctrl, "_notify"):
+        task = queue_ctrl.add_to_queue(_sample_track())
+    assert task.profile.format.value  == "flac"
+
+
+def test_add_to_queue_uses_config_folder_structure(queue_ctrl):
+    queue_ctrl._config["folder_structure"] = "{artist}/{title}"
+    with patch("utils.donor_gate.can_download", return_value=True), \
+         patch.object(queue_ctrl, "_process_task"), \
+         patch.object(queue_ctrl, "_notify"):
+        task = queue_ctrl.add_to_queue(_sample_track())
+    assert task.structure == "{artist}/{title}"
+
+
+def test_add_to_queue_prepends_platform_subfolder_when_enabled(queue_ctrl):
+    """subfolder_per_platform=True → 'Spotify/{artist}/{album}/...'"""
+    queue_ctrl._config["subfolder_per_platform"] = True
+    with patch("utils.donor_gate.can_download", return_value=True), \
+         patch.object(queue_ctrl, "_process_task"), \
+         patch.object(queue_ctrl, "_notify"):
+        task = queue_ctrl.add_to_queue(_sample_track(platform="spotify"))
+    assert task.structure.startswith("Spotify/")
+
+
+def test_add_to_queue_platform_subfolder_falls_back_to_other(queue_ctrl):
+    """An unknown platform (YouTube isn't in the _PLATFORM_SUBDIR map)
+    lands under 'Other/'."""
+    queue_ctrl._config["subfolder_per_platform"] = True
+    with patch("utils.donor_gate.can_download", return_value=True), \
+         patch.object(queue_ctrl, "_process_task"), \
+         patch.object(queue_ctrl, "_notify"):
+        task = queue_ctrl.add_to_queue(_sample_track(platform="youtube"))
+    assert task.structure.startswith("Other/")
+
+
+def test_add_to_queue_creates_output_dir(queue_ctrl, tmp_path):
+    """ensure_dir must be called so the download can write into it —
+    first-time users have no 'downloads/' folder yet."""
+    target = tmp_path / "brand_new" / "downloads"
+    queue_ctrl._config["download_folder"] = str(target)
+    assert not target.exists()
+    with patch("utils.donor_gate.can_download", return_value=True), \
+         patch.object(queue_ctrl, "_process_task"), \
+         patch.object(queue_ctrl, "_notify"):
+        queue_ctrl.add_to_queue(_sample_track())
+    assert target.exists()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# add_album_to_queue
+# ─────────────────────────────────────────────────────────────────────────
+
+def _album(title="Album", source_url="https://album/url"):
+    return TrackInfo(title=title, artists=["Artist"],
+                     platform="spotify", source_url=source_url,
+                     is_album=True)
+
+
+def test_add_album_expands_to_tracks_and_enqueues(queue_ctrl):
+    album = _album()
+    queue_ctrl.search_manager.resolve_url.return_value = [
+        _sample_track(title="S1"),
+        _sample_track(title="S2"),
+        _sample_track(title="S3"),
+    ]
+    with patch("utils.donor_gate.can_download", return_value=True), \
+         patch.object(queue_ctrl, "_process_task"), \
+         patch.object(queue_ctrl, "_notify"):
+        n = queue_ctrl.add_album_to_queue(album)
+    assert n == 3
+    assert len(queue_ctrl._queue) == 3
+
+
+def test_add_album_filters_placeholder_album_entries(queue_ctrl):
+    """resolve_url can return the album itself alongside its tracks; the
+    album placeholder must be dropped so it isn't re-queued recursively."""
+    album = _album()
+    queue_ctrl.search_manager.resolve_url.return_value = [
+        _album(title="ThisAlbum"),           # is_album=True → dropped
+        _sample_track(title="S1"),
+        _sample_track(title="S2"),
+    ]
+    with patch("utils.donor_gate.can_download", return_value=True), \
+         patch.object(queue_ctrl, "_process_task"), \
+         patch.object(queue_ctrl, "_notify"):
+        n = queue_ctrl.add_album_to_queue(album)
+    assert n == 2
+
+
+def test_add_album_returns_zero_when_resolve_returns_empty(queue_ctrl):
+    """Provider returned []  (private/deleted album) → don't try to
+    enqueue anything, return 0."""
+    album = _album()
+    queue_ctrl.search_manager.resolve_url.return_value = []
+    n = queue_ctrl.add_album_to_queue(album)
+    assert n == 0
+
+
+def test_add_album_returns_zero_when_resolve_raises(queue_ctrl):
+    """Provider exception must be logged, not propagated."""
+    album = _album()
+    queue_ctrl.search_manager.resolve_url.side_effect = RuntimeError("boom")
+    n = queue_ctrl.add_album_to_queue(album)
+    assert n == 0
+
+
+def test_add_album_returns_zero_when_no_source_url(queue_ctrl):
+    """No URL means we can't resolve — skip cleanly."""
+    album = _album(source_url="")
+    n = queue_ctrl.add_album_to_queue(album)
+    assert n == 0
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# enqueue_result — album/track dispatch
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_enqueue_result_dispatches_to_album_for_album(queue_ctrl):
+    album = _album()
+    with patch.object(queue_ctrl, "add_album_to_queue",
+                      return_value=5) as ab, \
+         patch.object(queue_ctrl, "add_to_queue") as at:
+        n = queue_ctrl.enqueue_result(album)
+    ab.assert_called_once_with(album)
+    at.assert_not_called()
+    assert n == 5
+
+
+def test_enqueue_result_dispatches_to_track_for_single(queue_ctrl):
+    track = _sample_track()
+    with patch.object(queue_ctrl, "add_album_to_queue") as ab, \
+         patch.object(queue_ctrl, "add_to_queue") as at:
+        n = queue_ctrl.enqueue_result(track)
+    at.assert_called_once_with(track)
+    ab.assert_not_called()
+    assert n == 1
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# remove_from_queue
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_remove_from_queue_signals_downloader_cancel(queue_ctrl):
+    task = _pending_task()
+    queue_ctrl._queue.append(task)
+    with patch.object(queue_ctrl, "_notify"):
+        queue_ctrl.remove_from_queue(task)
+    queue_ctrl.downloader.cancel.assert_called_once_with(task.task_id)
+
+
+def test_remove_from_queue_flips_status_to_cancelled(queue_ctrl):
+    task = _pending_task()
+    task.status = DownloadStatus.PENDING
+    queue_ctrl._queue.append(task)
+    with patch.object(queue_ctrl, "_notify"):
+        queue_ctrl.remove_from_queue(task)
+    assert task.status == DownloadStatus.CANCELLED
+
+
+def test_remove_from_queue_does_not_change_terminal_status(queue_ctrl):
+    """A DONE or ERROR task keeps its status — the row was final already."""
+    task = _pending_task()
+    task.status = DownloadStatus.DONE
+    queue_ctrl._queue.append(task)
+    with patch.object(queue_ctrl, "_notify"):
+        queue_ctrl.remove_from_queue(task)
+    assert task.status == DownloadStatus.DONE
+
+
+def test_remove_from_queue_removes_from_internal_list(queue_ctrl):
+    task = _pending_task()
+    queue_ctrl._queue.append(task)
+    with patch.object(queue_ctrl, "_notify"):
+        queue_ctrl.remove_from_queue(task)
+    assert task not in queue_ctrl._queue
+
+
+def test_remove_from_queue_tolerates_missing_task(queue_ctrl):
+    """The task might already be gone from _queue (e.g. clear_completed
+    ran first).  The remove call must not raise."""
+    task = _pending_task()
+    task.status = DownloadStatus.PENDING
+    with patch.object(queue_ctrl, "_notify"):
+        queue_ctrl.remove_from_queue(task)   # not in queue — must not raise
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# clear_completed
+# ─────────────────────────────────────────────────────────────────────────
+
+def test_clear_completed_removes_terminal_tasks(queue_ctrl):
+    t_pending    = _pending_task(); t_pending.status    = DownloadStatus.PENDING
+    t_downloading= _pending_task(); t_downloading.status= DownloadStatus.DOWNLOADING
+    t_done       = _pending_task(); t_done.status       = DownloadStatus.DONE
+    t_error      = _pending_task(); t_error.status      = DownloadStatus.ERROR
+    t_cancelled  = _pending_task(); t_cancelled.status  = DownloadStatus.CANCELLED
+    queue_ctrl._queue = [t_pending, t_downloading, t_done, t_error, t_cancelled]
+
+    queue_ctrl.clear_completed()
+
+    assert queue_ctrl._queue == [t_pending, t_downloading]
+
+
+def test_clear_completed_empty_queue_is_safe(queue_ctrl):
+    queue_ctrl._queue = []
+    queue_ctrl.clear_completed()   # must not raise
+    assert queue_ctrl._queue == []
