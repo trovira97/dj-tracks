@@ -8,6 +8,22 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.3.3] — 2026-07-12
+
+### Internal
+No user-visible changes.  This release is a **test-hardening baseline**:
+went from 316 → 715 automated tests (+126%), covering every core
+module: freemium gate, auto-updater (semver + streaming download +
+apply flow), YouTube / SoundCloud / Spotify / Apple Music / Bandcamp
+providers, metadata read/write pipeline (Mutagen), Beatport +
+GetSongBPM DJ enrichment orchestration, controller worker + queue
+management + cross-platform retry, DJ export (Rekordbox/Traktor/
+M3U8), library dedup index, queue persistence with corruption
+tolerance, and pygame preview player.
+
+Any future regression in the download → enrich → tag → export
+pipeline is now caught by CI before shipping.
+
 ## [2.3.2] — 2026-07-12
 
 ### Added
