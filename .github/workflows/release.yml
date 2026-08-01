@@ -70,7 +70,7 @@ jobs:
           $tag = "${{ github.ref_name }}"
           Compress-Archive -Path "dist/DJ Tracks" -DestinationPath "dist/DJ Tracks $tag Windows.zip" -CompressionLevel Optimal
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-bundle
           path: dist/DJ Tracks ${{ github.ref_name }} Windows.zip
@@ -126,7 +126,7 @@ jobs:
             cd dist && zip -r "DJ Tracks $tag macOS.zip" "DJ Tracks.app"
           }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-bundle
           path: |
@@ -178,7 +178,7 @@ jobs:
           cd dist
           tar -czf "DJ Tracks $tag Linux.tar.gz" "DJ Tracks"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-bundle
           path: dist/DJ Tracks ${{ github.ref_name }} Linux.tar.gz
