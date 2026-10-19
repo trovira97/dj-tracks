@@ -17,11 +17,9 @@ Focus:
 """
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from metadata.metadata_reader import AudioMetadata, read_metadata
-
 
 # ─────────────────────────────────────────────────────────────────────────
 # AudioMetadata.artist_str

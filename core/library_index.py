@@ -62,8 +62,7 @@ def _normalise(text: str) -> str:
     t = _TRAILING_FEAT_RE.sub("", t)
     # Strip punctuation that varies between platforms.
     t = re.sub(r"[^\w\s-]", "", t)
-    t = _WS_RE.sub(" ", t).strip()
-    return t
+    return _WS_RE.sub(" ", t).strip()
 
 
 def track_key(artist: str, title: str) -> tuple[str, str]:

@@ -26,7 +26,6 @@ from utils.donor_gate import (
     set_donor,
 )
 
-
 # ── Fixture: fresh state per test ────────────────────────────────────────
 
 @pytest.fixture(autouse=True)

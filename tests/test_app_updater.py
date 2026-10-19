@@ -8,11 +8,7 @@ false-positive update prompts, or worse, hide real updates.
 from __future__ import annotations
 
 import sys
-from unittest.mock import patch
-
-from unittest.mock import MagicMock
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from utils.app_updater import (
     _parse_version,
@@ -22,7 +18,6 @@ from utils.app_updater import (
     is_frozen,
     is_newer,
 )
-
 
 # ── Version parsing ──────────────────────────────────────────────────────
 

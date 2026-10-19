@@ -28,7 +28,6 @@ from downloader.audio_downloader import DownloadStatus, DownloadTask
 from downloader.quality_manager import get_profile
 from providers import TrackInfo
 
-
 # ─────────────────────────────────────────────────────────────────────────
 # Fixture: redirect QUEUE_PATH to a temp file per test
 # ─────────────────────────────────────────────────────────────────────────

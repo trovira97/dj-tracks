@@ -21,7 +21,6 @@ Focus:
 """
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -41,7 +40,6 @@ from metadata.dj_metadata import (
     replaygain_values,
     upscale_cover_url,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────
 # _normalise_key + key_to_camelot

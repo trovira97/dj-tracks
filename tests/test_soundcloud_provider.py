@@ -28,7 +28,6 @@ import pytest
 
 from providers.soundcloud_provider import SoundCloudProvider
 
-
 # ─────────────────────────────────────────────────────────────────────────
 # Fixtures
 # ─────────────────────────────────────────────────────────────────────────

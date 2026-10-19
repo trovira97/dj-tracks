@@ -118,8 +118,7 @@ def _perms_moderador() -> discord.Permissions:
 
 def _perms_owner() -> discord.Permissions:
     """@Owner: full admin."""
-    p = discord.Permissions.all()
-    return p
+    return discord.Permissions.all()
 
 
 DESIRED: dict[str, discord.Permissions] = {

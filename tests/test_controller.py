@@ -53,7 +53,6 @@ from downloader.audio_downloader import DownloadStatus, DownloadTask
 from downloader.quality_manager import get_profile
 from providers import TrackInfo
 
-
 # ─────────────────────────────────────────────────────────────────────────
 # Fixtures — build a bare AppController without touching config/providers
 # ─────────────────────────────────────────────────────────────────────────
@@ -713,6 +712,7 @@ def test_dj_enrich_uses_downloader_ffmpeg_path(tmp_path, bare_ctrl):
 # ─────────────────────────────────────────────────────────────────────────
 
 from concurrent.futures import ThreadPoolExecutor  # noqa: E402
+
 from core.controller import DonorGateBlocked  # noqa: E402
 
 
@@ -751,9 +751,8 @@ def test_add_to_queue_raises_when_freemium_limit_hit(queue_ctrl):
     """When can_download() returns False, add_to_queue must raise
     DonorGateBlocked so the UI can show the lockout dialog."""
     with patch("utils.donor_gate.can_download", return_value=False), \
-         patch.object(queue_ctrl, "_process_task"):
-        with pytest.raises(DonorGateBlocked):
-            queue_ctrl.add_to_queue(_sample_track())
+         patch.object(queue_ctrl, "_process_task"), pytest.raises(DonorGateBlocked):
+        queue_ctrl.add_to_queue(_sample_track())
     # Queue must NOT contain the task on a blocked call.
     assert queue_ctrl._queue == []
 

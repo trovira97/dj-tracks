@@ -18,8 +18,7 @@ isolated, and clears the class-level ``_instance`` in a fixture.
 from __future__ import annotations
 
 import sys
-from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -56,7 +55,6 @@ from utils.audio_player import (  # noqa: E402
     _read_duration,
     _read_tags,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────
 # Fixtures

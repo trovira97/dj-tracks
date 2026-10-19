@@ -14,7 +14,6 @@ from unittest.mock import MagicMock, patch
 
 from utils.ytdlp_updater import _norm, update_ytdlp
 
-
 # ── Version normalisation ────────────────────────────────────────────────
 
 def test_norm_strips_leading_zeroes():

@@ -14,7 +14,6 @@ Focus:
 """
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -31,7 +30,6 @@ from metadata.metadata_writer import (
     write_metadata,
 )
 from providers import TrackInfo
-
 
 # ─────────────────────────────────────────────────────────────────────────
 # download_cover

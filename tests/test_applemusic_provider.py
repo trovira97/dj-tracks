@@ -25,7 +25,6 @@ import pytest
 
 from providers.applemusic_provider import AppleMusicProvider
 
-
 # ─────────────────────────────────────────────────────────────────────────
 # Fixtures
 # ─────────────────────────────────────────────────────────────────────────

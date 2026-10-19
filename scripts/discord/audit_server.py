@@ -132,12 +132,18 @@ class OneShot(discord.Client):
             top = m.top_role
             perms = m.guild_permissions
             flags = []
-            if perms.administrator: flags.append("ADMIN")
-            if perms.manage_guild:  flags.append("manage_guild")
-            if perms.manage_roles:  flags.append("manage_roles")
-            if perms.ban_members:   flags.append("ban")
-            if perms.kick_members:  flags.append("kick")
-            if perms.manage_channels: flags.append("manage_channels")
+            if perms.administrator:
+                flags.append("ADMIN")
+            if perms.manage_guild:
+                flags.append("manage_guild")
+            if perms.manage_roles:
+                flags.append("manage_roles")
+            if perms.ban_members:
+                flags.append("ban")
+            if perms.kick_members:
+                flags.append("kick")
+            if perms.manage_channels:
+                flags.append("manage_channels")
             flags_str = ",".join(flags) or "basic"
             log.info(f"  🤖 {_safe(str(m)):30} top-role={_safe(top.name):20} "
                      f"perms={flags_str}")

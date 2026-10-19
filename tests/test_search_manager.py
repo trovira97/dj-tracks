@@ -14,7 +14,6 @@ from core.search_manager import SearchManager
 from providers import TrackInfo
 from utils.validators import Platform
 
-
 # ── Deduplication ────────────────────────────────────────────────────────
 
 def _track(artist, title, *, is_album=False):

@@ -220,8 +220,7 @@ def _normalise(text: str) -> str:
     for src, dst in accents.items():
         text = text.replace(src, dst)
     # Collapse whitespace.
-    text = re.sub(r"\s+", " ", text)
-    return text
+    return re.sub(r"\s+", " ", text)
 
 
 def match(text: str) -> FaqEntry | None:

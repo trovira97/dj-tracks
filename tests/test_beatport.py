@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -40,7 +40,6 @@ from metadata.beatport import (
     lookup_beatport,
     search,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────
 # Fixture — isolate the disk cache per test
