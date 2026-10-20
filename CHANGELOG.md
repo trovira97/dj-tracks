@@ -8,6 +8,26 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.3.4] — 2026-10-20
+
+### Internal
+Housekeeping-only release — no user-visible behaviour change.
+
+### Changed
+- **Dependency sweep** (16 PRs mergeados):
+  - **GitHub Actions**: `checkout` 4→7, `setup-python` 5→7,
+    `upload-artifact` 4→7, `download-artifact` 4→8,
+    `softprops/action-gh-release` 2→3
+  - **Backend (Fly.io)**: `discord-py` ≥2.7.1, `fastapi` ≥0.115,
+    `httpx` ≥0.28.1, `uvicorn` ≥0.49, `python-multipart` ≥0.0.32
+  - **App runtime**: `discord-py` ≥2.7.1, `pygame` ≥2.6.1,
+    `tkinterdnd2` ≥0.5.0, `rapidfuzz` ≥3.14.5, `python-multipart`
+    ≥0.0.32
+- **Clean lint sweep** — 34 ruff findings resueltos (I001 import
+  order, F401 unused imports, RET504 redundant assigns, E701 one-
+  liners expandidos a PEP 8 en `scripts/discord/audit_server.py`).
+  CI matrix (Python 3.10/3.11/3.12 + ruff) ahora verde.
+
 ## [2.3.3] — 2026-07-12
 
 ### Internal
